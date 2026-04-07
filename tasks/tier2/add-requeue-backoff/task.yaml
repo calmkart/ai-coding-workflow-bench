@@ -1,0 +1,28 @@
+id: "tier2/add-requeue-backoff"
+name: "添加重试退避"
+tier: 2
+type: "reconciler"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-BACK-01
+    category: resilience
+    name: "无退避策略"
+    severity: high
+    description: "失败后立即重试，无指数退避"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "失败后改为指数退避重试"
+
+code_smells:
+  - "错误时 Requeue 无延迟"
+  - "连续失败不增加等待时间"
+
+metadata:
+  files_to_modify: ["reconciler.go"]
+  tags: ["feature", "reconciler", "backoff"]

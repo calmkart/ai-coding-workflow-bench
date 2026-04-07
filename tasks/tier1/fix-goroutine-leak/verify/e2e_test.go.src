@@ -1,0 +1,90 @@
+package workerpool
+
+import (
+	"runtime"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("stop_releases_goroutines", func(t *testing.T) {
+		baseline := runtime.NumGoroutine()
+
+		pool := NewPool(4)
+		pool.Start()
+
+		// Let workers start
+		time.Sleep(50 * time.Millisecond)
+
+		afterStart := runtime.NumGoroutine()
+		if afterStart <= baseline {
+			t.Fatalf("expected goroutines to increase after Start, baseline=%d, after=%d",
+				baseline, afterStart)
+		}
+
+		pool.Stop()
+
+		// Wait for goroutines to exit
+		time.Sleep(200 * time.Millisecond)
+
+		afterStop := runtime.NumGoroutine()
+		leaked := afterStop - baseline
+		if leaked > 1 {
+			t.Fatalf("goroutine leak: baseline=%d, after stop=%d, leaked=%d",
+				baseline, afterStop, leaked)
+		}
+	})
+
+	t.Run("work_completes_before_stop", func(t *testing.T) {
+		pool := NewPool(2)
+		pool.Start()
+
+		var count atomic.Int32
+		for i := 0; i < 5; i++ {
+			pool.Submit(func() {
+				count.Add(1)
+			})
+		}
+
+		// Wait for work
+		time.Sleep(100 * time.Millisecond)
+		pool.Stop()
+
+		if count.Load() != 5 {
+			t.Fatalf("expected 5 tasks completed, got %d", count.Load())
+		}
+	})
+
+	t.Run("submit_after_stop_no_panic", func(t *testing.T) {
+		pool := NewPool(2)
+		pool.Start()
+		pool.Stop()
+
+		// Wait for stop to take effect
+		time.Sleep(100 * time.Millisecond)
+
+		// Should not panic
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Submit after Stop panicked: %v", r)
+			}
+		}()
+
+		// This might block or be dropped, but should not panic
+		done := make(chan bool, 1)
+		go func() {
+			defer func() {
+				recover() // catch any panic in goroutine
+				done <- true
+			}()
+			pool.Submit(func() {})
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(200 * time.Millisecond):
+			// Submit blocked, that's acceptable
+		}
+	})
+}

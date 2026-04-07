@@ -1,0 +1,27 @@
+id: "tier3/implement-concurrent-pipeline"
+name: "实现三阶段并发管道"
+tier: 3
+type: "concurrency"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "func RunPipeline[T, U, V any](ctx context.Context, producer func(context.Context, chan<- T), transform func(T) (U, error), consumer func(U) (V, error)) ([]V, error)"
+
+verification_targets:
+  - id: VT-CPIPE-01
+    category: feature
+    name: "无并发管道"
+    severity: medium
+    description: "需要实现 producer -> transform -> consumer 三阶段管道"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 producer -> transform -> consumer 三阶段 channel 管道"
+
+code_smells:
+  - "顺序处理数据，无流水线"
+
+metadata:
+  files_to_modify: ["pipeline.go"]
+  tags: ["feature", "concurrency", "pipeline"]

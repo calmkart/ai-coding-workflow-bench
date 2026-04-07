@@ -1,0 +1,27 @@
+id: "tier2/add-graceful-shutdown"
+name: "添加优雅关闭"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-SHUT-01
+    category: resilience
+    name: "无优雅关闭"
+    severity: high
+    description: "main() 直接 ListenAndServe，没有信号处理和优雅关闭"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 SIGTERM/SIGINT 处理和 http.Server.Shutdown"
+
+code_smells:
+  - "直接调用 log.Fatal(http.ListenAndServe(...)) 不支持优雅关闭"
+
+metadata:
+  files_to_modify: ["main.go"]
+  tags: ["feature", "graceful-shutdown", "signals"]

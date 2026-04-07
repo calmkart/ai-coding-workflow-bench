@@ -1,0 +1,27 @@
+id: "tier1/add-health-check"
+name: "添加 /health 端点"
+tier: 1
+type: "http-server"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-HTTP-01
+    category: http
+    name: "缺少服务器超时"
+    severity: critical
+    description: "添加 health 端点时应注意服务器超时配置"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "添加 GET /health 端点返回 200 + {\"status\":\"ok\"}"
+
+code_smells:
+  - "缺少 health check 端点，无法用于健康检查"
+
+metadata:
+  files_to_modify: ["main.go"]
+  tags: ["feature", "health-check"]

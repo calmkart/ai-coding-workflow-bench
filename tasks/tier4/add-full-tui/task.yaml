@@ -1,0 +1,36 @@
+id: "tier4/add-full-tui"
+name: "实现完整 TUI 界面"
+tier: 4
+type: "cli"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type App struct"
+  - "type Component interface"
+  - "type ListSelector struct"
+  - "type TextInput struct"
+  - "type StatusBar struct"
+  - "func NewApp(components ...Component) *App"
+  - "func (a *App) Render() string"
+  - "func (a *App) HandleKey(key KeyEvent) bool"
+
+verification_targets:
+  - id: VT-TUI-01
+    category: feature
+    name: "无 TUI 界面"
+    severity: high
+    description: "需要实现基于 ANSI escape 的 TUI"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 ANSI escape 序列渲染"
+  - "实现组件系统（列表、输入框、状态栏）"
+  - "实现键盘事件处理"
+
+code_smells:
+  - "只有空的接口定义"
+
+metadata:
+  files_to_modify: ["tui.go", "components.go"]
+  tags: ["feature", "tui", "ansi", "terminal"]

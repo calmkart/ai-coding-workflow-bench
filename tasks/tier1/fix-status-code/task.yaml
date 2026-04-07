@@ -1,0 +1,27 @@
+id: "tier1/fix-status-code"
+name: "修复 POST 返回状态码"
+tier: 1
+type: "http-server"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-HTTP-01
+    category: http
+    name: "错误的状态码"
+    severity: high
+    description: "POST /todos 应返回 201 Created 而非 200 OK"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 POST /todos 返回 201 Created 而非 200 OK"
+
+code_smells:
+  - "createTodo handler 缺少 w.WriteHeader(http.StatusCreated)，默认返回 200"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["bugfix", "http-status"]

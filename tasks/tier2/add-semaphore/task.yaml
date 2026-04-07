@@ -1,0 +1,27 @@
+id: "tier2/add-semaphore"
+name: "实现信号量"
+tier: 2
+type: "library"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func NewSemaphore(n int) *Semaphore"
+
+verification_targets:
+  - id: VT-SEM-01
+    category: concurrency
+    name: "缺少信号量"
+    severity: medium
+    description: "需要基于 channel 的信号量"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现基于 channel 的 Semaphore{Acquire/Release}"
+
+code_smells:
+  - "无法控制并发数"
+
+metadata:
+  files_to_modify: ["semaphore.go"]
+  tags: ["feature", "concurrency", "semaphore"]

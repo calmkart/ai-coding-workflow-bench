@@ -1,0 +1,105 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func seedTodos(t *testing.T, baseURL string, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		body := fmt.Sprintf(`{"title":"todo-%d","done":false}`, i+1)
+		resp, err := http.Post(baseURL+"/todos", "application/json",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("seed todo %d: expected 201, got %d", i+1, resp.StatusCode)
+		}
+	}
+}
+
+func getTodos(t *testing.T, url string) []map[string]any {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var result []map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	return result
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Seed 25 todos
+	seedTodos(t, ts.URL, 25)
+
+	t.Run("page1_returns_first_10", func(t *testing.T) {
+		todos := getTodos(t, ts.URL+"/todos?page=1&page_size=10")
+		if len(todos) != 10 {
+			t.Fatalf("page 1: expected 10 items, got %d", len(todos))
+		}
+		// First item should be todo-1
+		if todos[0]["title"] != "todo-1" {
+			t.Fatalf("page 1 first item: expected todo-1, got %s", todos[0]["title"])
+		}
+	})
+
+	t.Run("page2_returns_next_10", func(t *testing.T) {
+		todos := getTodos(t, ts.URL+"/todos?page=2&page_size=10")
+		if len(todos) != 10 {
+			t.Fatalf("page 2: expected 10 items, got %d", len(todos))
+		}
+		// First item should be todo-11, not todo-21
+		if todos[0]["title"] != "todo-11" {
+			t.Fatalf("page 2 first item: expected todo-11, got %s", todos[0]["title"])
+		}
+	})
+
+	t.Run("page3_returns_last_5", func(t *testing.T) {
+		todos := getTodos(t, ts.URL+"/todos?page=3&page_size=10")
+		if len(todos) != 5 {
+			t.Fatalf("page 3: expected 5 items, got %d", len(todos))
+		}
+	})
+
+	t.Run("page0_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page=0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("page 0: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("page_negative_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page=-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("page -1: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("page_beyond_range_returns_empty", func(t *testing.T) {
+		todos := getTodos(t, ts.URL+"/todos?page=100&page_size=10")
+		if len(todos) != 0 {
+			t.Fatalf("page 100: expected 0 items, got %d", len(todos))
+		}
+	})
+}

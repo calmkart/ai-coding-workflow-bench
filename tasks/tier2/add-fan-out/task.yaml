@@ -1,0 +1,27 @@
+id: "tier2/add-fan-out"
+name: "实现 Fan-Out"
+tier: 2
+type: "concurrency"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func FanOut[T any, R any](input []T, workers int, fn func(T) R) []R"
+
+verification_targets:
+  - id: VT-FAN-01
+    category: concurrency
+    name: "缺少 fan-out"
+    severity: medium
+    description: "需要并发分发处理"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 FanOut(input, workers) 并发处理"
+
+code_smells:
+  - "串行处理大量数据"
+
+metadata:
+  files_to_modify: ["fanout.go"]
+  tags: ["feature", "concurrency", "fan-out"]

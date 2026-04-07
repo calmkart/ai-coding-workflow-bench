@@ -1,0 +1,85 @@
+package pipeline
+
+import (
+	"sort"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("process_no_deadlock", func(t *testing.T) {
+		done := make(chan []string, 1)
+		go func() {
+			done <- Process([]string{"hello", "world", "foo"})
+		}()
+
+		select {
+		case results := <-done:
+			if len(results) != 3 {
+				t.Fatalf("expected 3 results, got %d", len(results))
+			}
+			sort.Strings(results)
+			expected := []string{"FOO", "HELLO", "WORLD"}
+			for i, r := range results {
+				if r != expected[i] {
+					t.Fatalf("result[%d]: expected %s, got %s", i, expected[i], r)
+				}
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Process deadlocked")
+		}
+	})
+
+	t.Run("process_empty", func(t *testing.T) {
+		done := make(chan []string, 1)
+		go func() {
+			done <- Process(nil)
+		}()
+
+		select {
+		case results := <-done:
+			if len(results) != 0 {
+				t.Fatalf("expected 0, got %d", len(results))
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Process(nil) deadlocked")
+		}
+	})
+
+	t.Run("transform_no_deadlock", func(t *testing.T) {
+		done := make(chan []string, 1)
+		go func() {
+			done <- Transform([]string{"a", "b", "c"}, strings.ToUpper)
+		}()
+
+		select {
+		case results := <-done:
+			if len(results) != 3 {
+				t.Fatalf("expected 3 results, got %d", len(results))
+			}
+			sort.Strings(results)
+			if results[0] != "A" || results[1] != "B" || results[2] != "C" {
+				t.Fatalf("unexpected results: %v", results)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Transform deadlocked")
+		}
+	})
+
+	t.Run("process_single_item", func(t *testing.T) {
+		done := make(chan []string, 1)
+		go func() {
+			done <- Process([]string{"single"})
+		}()
+
+		select {
+		case results := <-done:
+			if len(results) != 1 || results[0] != "SINGLE" {
+				t.Fatalf("expected [SINGLE], got %v", results)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("deadlocked")
+		}
+	})
+}

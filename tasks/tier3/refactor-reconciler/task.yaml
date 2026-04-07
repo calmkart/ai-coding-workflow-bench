@@ -1,0 +1,29 @@
+id: "tier3/refactor-reconciler"
+name: "拆分巨型 Reconcile 为子 reconciler"
+tier: 3
+type: "reconciler"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-REC-01
+    category: design
+    name: "巨型 Reconcile"
+    severity: high
+    description: "Reconcile() 函数做所有事，需要拆分为子 reconciler"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "将巨型 Reconcile 拆分为 validateSpec, ensureResources, updateStatus 三个子 reconciler"
+
+code_smells:
+  - "单个 Reconcile 函数 200+ 行"
+  - "混合验证、资源管理、状态更新逻辑"
+  - "难以单独测试各阶段"
+
+metadata:
+  files_to_modify: ["reconciler.go"]
+  tags: ["refactoring", "reconciler", "decomposition"]

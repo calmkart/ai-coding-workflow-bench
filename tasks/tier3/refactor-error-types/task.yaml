@@ -1,0 +1,30 @@
+id: "tier3/refactor-error-types"
+name: "重构为类型化错误 AppError"
+tier: 3
+type: "http-server"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-ERR-01
+    category: design
+    name: "字符串错误"
+    severity: medium
+    description: "到处 http.Error 字符串，需要重构为 AppError{Code,Message,HTTPStatus}"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "定义 AppError 类型，统一错误响应格式"
+  - "提取统一错误处理中间件"
+
+code_smells:
+  - "http.Error 字符串散落各处"
+  - "错误格式不一致"
+  - "无统一错误码"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["refactoring", "error-handling"]

@@ -1,0 +1,27 @@
+id: "tier1/add-string-truncate"
+name: "添加字符串截断函数"
+tier: 1
+type: "library"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func Truncate(s string, maxLen int) string"
+
+verification_targets:
+  - id: VT-FEAT-01
+    category: feature
+    name: "缺少 Truncate 函数"
+    severity: medium
+    description: "需要添加按单词边界截断的 Truncate 函数"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "添加 Truncate 函数，按单词边界截断并添加 '...'"
+
+code_smells:
+  - "缺少常用的字符串截断功能"
+
+metadata:
+  files_to_modify: ["strkit.go"]
+  tags: ["feature", "string-utils"]

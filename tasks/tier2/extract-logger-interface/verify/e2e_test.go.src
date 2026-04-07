@@ -1,0 +1,87 @@
+package processor
+
+import (
+	"strings"
+	"testing"
+)
+
+// MockLogger captures log calls for verification.
+type MockLogger struct {
+	InfoMessages  []string
+	ErrorMessages []string
+}
+
+func (m *MockLogger) Info(msg string, args ...any) {
+	m.InfoMessages = append(m.InfoMessages, msg)
+}
+
+func (m *MockLogger) Error(msg string, args ...any) {
+	m.ErrorMessages = append(m.ErrorMessages, msg)
+}
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("logger_interface_exists", func(t *testing.T) {
+		// Must compile - proves Logger interface exists
+		var _ Logger = &MockLogger{}
+	})
+
+	t.Run("processor_uses_injected_logger", func(t *testing.T) {
+		mock := &MockLogger{}
+		p := NewProcessor("test", mock)
+		p.Process(Item{ID: 1, Name: "item1", Data: "hello"})
+
+		if len(mock.InfoMessages) == 0 {
+			t.Fatal("expected info messages from processor")
+		}
+	})
+
+	t.Run("error_logged_for_empty_data", func(t *testing.T) {
+		mock := &MockLogger{}
+		p := NewProcessor("test", mock)
+		p.Process(Item{ID: 1, Name: "item1", Data: ""})
+
+		if len(mock.ErrorMessages) == 0 {
+			t.Fatal("expected error message for empty data")
+		}
+	})
+
+	t.Run("batch_logs_count", func(t *testing.T) {
+		mock := &MockLogger{}
+		p := NewProcessor("test", mock)
+		items := []Item{
+			{ID: 1, Name: "a", Data: "d1"},
+			{ID: 2, Name: "b", Data: "d2"},
+		}
+		p.ProcessBatch(items)
+
+		// Should have batch start + per-item + batch complete messages
+		found := false
+		for _, msg := range mock.InfoMessages {
+			if strings.Contains(msg, "batch") || strings.Contains(msg, "Batch") || strings.Contains(msg, "2") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("expected batch-related info message")
+		}
+	})
+
+	t.Run("std_logger_exists", func(t *testing.T) {
+		// StdLogger should implement Logger
+		var _ Logger = NewStdLogger()
+	})
+
+	t.Run("process_result_unchanged", func(t *testing.T) {
+		mock := &MockLogger{}
+		p := NewProcessor("pfx", mock)
+		result := p.Process(Item{ID: 5, Name: "test", Data: "val"})
+
+		if !result.Success {
+			t.Fatal("expected success")
+		}
+		if result.Output != "pfx:val" {
+			t.Fatalf("expected 'pfx:val', got '%s'", result.Output)
+		}
+	})
+}

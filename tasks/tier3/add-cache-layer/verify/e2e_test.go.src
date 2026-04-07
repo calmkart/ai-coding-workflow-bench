@@ -1,0 +1,157 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("create_and_get_cached", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"cache test"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+
+		// First GET - should populate cache
+		resp1, err := http.Get(ts.URL + "/todos/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp1.Body.Close()
+		if resp1.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp1.StatusCode)
+		}
+		var todo1 map[string]any
+		json.NewDecoder(resp1.Body).Decode(&todo1)
+		if todo1["title"] != "cache test" {
+			t.Fatalf("expected 'cache test', got %v", todo1["title"])
+		}
+
+		// Second GET - should hit cache, same result
+		resp2, err := http.Get(ts.URL + "/todos/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp2.Body.Close()
+		var todo2 map[string]any
+		json.NewDecoder(resp2.Body).Decode(&todo2)
+		if todo2["title"] != "cache test" {
+			t.Fatalf("cached get: expected 'cache test', got %v", todo2["title"])
+		}
+	})
+
+	t.Run("update_invalidates_cache", func(t *testing.T) {
+		// GET to populate cache
+		resp, err := http.Get(ts.URL + "/todos/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+
+		// UPDATE
+		req, _ := http.NewRequest("PUT", ts.URL+"/todos/1",
+			strings.NewReader(`{"title":"updated"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp2, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp2.StatusCode)
+		}
+
+		// GET again - should reflect update (cache invalidated)
+		resp3, err := http.Get(ts.URL + "/todos/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp3.Body.Close()
+		var todo map[string]any
+		json.NewDecoder(resp3.Body).Decode(&todo)
+		if todo["title"] != "updated" {
+			t.Fatalf("expected 'updated', got %v", todo["title"])
+		}
+	})
+
+	t.Run("delete_invalidates_cache", func(t *testing.T) {
+		// Create a new todo
+		resp, _ := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"to delete"}`))
+		resp.Body.Close()
+
+		var created map[string]any
+		resp2, _ := http.Get(ts.URL + "/todos/2")
+		json.NewDecoder(resp2.Body).Decode(&created)
+		resp2.Body.Close()
+
+		// DELETE
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/2", nil)
+		resp3, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp3.Body.Close()
+		if resp3.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected 204, got %d", resp3.StatusCode)
+		}
+
+		// GET should return 404 (cache invalidated)
+		resp4, err := http.Get(ts.URL + "/todos/2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp4.Body.Close()
+		if resp4.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404 after delete, got %d", resp4.StatusCode)
+		}
+	})
+
+	t.Run("list_returns_correct_data", func(t *testing.T) {
+		mux2 := setupRouter()
+		ts2 := httptest.NewServer(mux2)
+		defer ts2.Close()
+
+		for i := 0; i < 5; i++ {
+			resp, _ := http.Post(ts2.URL+"/todos", "application/json",
+				strings.NewReader(`{"title":"item"}`))
+			resp.Body.Close()
+		}
+
+		resp, err := http.Get(ts2.URL + "/todos?page=1&page_size=3")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+		items := body["items"].([]any)
+		if len(items) != 3 {
+			t.Fatalf("expected 3 items, got %d", len(items))
+		}
+	})
+
+	t.Run("health_check", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}

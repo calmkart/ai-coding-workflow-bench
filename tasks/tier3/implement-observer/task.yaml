@@ -1,0 +1,28 @@
+id: "tier3/implement-observer"
+name: "实现事件总线"
+tier: 3
+type: "library"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "type EventBus struct"
+  - "func NewEventBus() *EventBus"
+
+verification_targets:
+  - id: VT-OBS-01
+    category: feature
+    name: "无事件系统"
+    severity: medium
+    description: "需要实现事件总线：Subscribe/Publish/Unsubscribe"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现事件总线支持多个监听器、按主题订阅/发布/取消订阅"
+
+code_smells:
+  - "组件间直接调用，无解耦"
+
+metadata:
+  files_to_modify: ["eventbus.go"]
+  tags: ["feature", "pattern", "observer"]

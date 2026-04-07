@@ -1,0 +1,83 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("concurrent_requests_no_panic", func(t *testing.T) {
+		var wg sync.WaitGroup
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				http.Get(ts.URL + "/todos")
+			}()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				http.Post(ts.URL+"/todos", "application/json",
+					strings.NewReader(`{"title":"concurrent","done":false}`))
+			}()
+		}
+		wg.Wait()
+	})
+
+	t.Run("stats_count_correct", func(t *testing.T) {
+		// Create fresh server for counting
+		mux2 := setupRouter()
+		ts2 := httptest.NewServer(mux2)
+		defer ts2.Close()
+
+		// Make known number of requests
+		for i := 0; i < 3; i++ {
+			http.Get(ts2.URL + "/todos")
+		}
+		for i := 0; i < 2; i++ {
+			http.Post(ts2.URL+"/todos", "application/json",
+				strings.NewReader(`{"title":"test","done":false}`))
+		}
+
+		resp, err := http.Get(ts2.URL + "/stats")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		var stats map[string]int
+		json.NewDecoder(resp.Body).Decode(&stats)
+
+		if stats["list"] != 3 {
+			t.Fatalf("list count: expected 3, got %d", stats["list"])
+		}
+		if stats["create"] != 2 {
+			t.Fatalf("create count: expected 2, got %d", stats["create"])
+		}
+	})
+
+	t.Run("concurrent_stats_read", func(t *testing.T) {
+		var wg sync.WaitGroup
+		for i := 0; i < 20; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				http.Get(ts.URL + "/stats")
+			}()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				http.Get(ts.URL + "/todos")
+			}()
+		}
+		wg.Wait()
+	})
+}

@@ -1,0 +1,126 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("events_endpoint_exists", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/events", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil && !strings.Contains(err.Error(), "context") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp != nil {
+			defer resp.Body.Close()
+			ct := resp.Header.Get("Content-Type")
+			if !strings.Contains(ct, "text/event-stream") {
+				t.Fatalf("expected text/event-stream, got %s", ct)
+			}
+		}
+	})
+
+	t.Run("create_triggers_event", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Start SSE listener
+		req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/events", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("SSE connect: %v", err)
+		}
+		defer resp.Body.Close()
+
+		eventCh := make(chan string, 10)
+		go func() {
+			scanner := bufio.NewScanner(resp.Body)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.HasPrefix(line, "data:") {
+					eventCh <- strings.TrimPrefix(line, "data:")
+					return
+				}
+			}
+		}()
+
+		// Give SSE time to connect
+		time.Sleep(100 * time.Millisecond)
+
+		// Create a todo
+		createResp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"sse test"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		createResp.Body.Close()
+
+		// Wait for event
+		select {
+		case data := <-eventCh:
+			data = strings.TrimSpace(data)
+			var event map[string]any
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				t.Fatalf("invalid event JSON: %v, data: %s", err, data)
+			}
+			// Event should contain todo data
+			if event["id"] == nil && event["todo"] == nil {
+				t.Fatalf("event missing todo data: %v", event)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout waiting for SSE event")
+		}
+	})
+
+	t.Run("crud_operations_still_work", func(t *testing.T) {
+		mux2 := setupRouter()
+		ts2 := httptest.NewServer(mux2)
+		defer ts2.Close()
+
+		// Create
+		resp, err := http.Post(ts2.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"crud test"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create: expected 201, got %d", resp.StatusCode)
+		}
+
+		// List
+		resp2, err := http.Get(ts2.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("list: expected 200, got %d", resp2.StatusCode)
+		}
+	})
+
+	t.Run("health_check", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}

@@ -1,0 +1,69 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("post_returns_201_created", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"buy milk","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("post_returns_todo_body", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"walk dog","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+
+		if todo["title"] != "walk dog" {
+			t.Fatalf("expected title=walk dog, got %v", todo["title"])
+		}
+	})
+
+	t.Run("post_invalid_body_returns_400", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`not json`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("get_still_returns_200", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}

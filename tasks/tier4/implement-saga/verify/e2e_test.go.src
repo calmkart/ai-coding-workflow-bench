@@ -1,0 +1,216 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func sagaReq(t *testing.T, ts *httptest.Server, method, path, body string) *http.Response {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body != "" {
+		req, err = http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req, err = http.NewRequest(method, ts.URL+path, nil)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("successful_project_creation", func(t *testing.T) {
+		body := `{"name":"test-project","todos":["todo-1","todo-2","todo-3"]}`
+		resp := sagaReq(t, ts, "POST", "/projects", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create project: expected 201, got %d", resp.StatusCode)
+		}
+		var project map[string]any
+		json.NewDecoder(resp.Body).Decode(&project)
+		if project["name"] != "test-project" {
+			t.Fatalf("wrong name: %v", project["name"])
+		}
+		if project["status"] != "active" {
+			t.Fatalf("status should be active, got %v", project["status"])
+		}
+		todoIDs, ok := project["todo_ids"].([]any)
+		if !ok || len(todoIDs) != 3 {
+			t.Fatalf("expected 3 todo_ids, got %v", project["todo_ids"])
+		}
+	})
+
+	t.Run("failed_step_triggers_compensation", func(t *testing.T) {
+		// This should fail during todo creation (empty title triggers failure)
+		body := `{"name":"fail-project","todos":["good-todo","","bad-todo"]}`
+		resp := sagaReq(t, ts, "POST", "/projects", body)
+		defer resp.Body.Close()
+
+		// The project creation should fail
+		if resp.StatusCode == http.StatusCreated {
+			// If it somehow succeeds, the project should not be "active"
+			var project map[string]any
+			json.NewDecoder(resp.Body).Decode(&project)
+			if project["status"] == "active" {
+				t.Fatal("project with failed todo should not be active")
+			}
+		}
+
+		// After compensation, the project should not exist OR should be "failed"
+		listResp := sagaReq(t, ts, "GET", "/projects", "")
+		defer listResp.Body.Close()
+		var projects []map[string]any
+		json.NewDecoder(listResp.Body).Decode(&projects)
+		for _, p := range projects {
+			if p["name"] == "fail-project" {
+				status := p["status"].(string)
+				if status == "active" {
+					t.Fatal("failed project should not be active — compensation should have cleaned up")
+				}
+				// "failed" or not present is acceptable
+			}
+		}
+	})
+
+	t.Run("compensation_cleans_up_todos", func(t *testing.T) {
+		// Get current todo count
+		listBefore := sagaReq(t, ts, "GET", "/todos", "")
+		defer listBefore.Body.Close()
+		var todosBefore []map[string]any
+		json.NewDecoder(listBefore.Body).Decode(&todosBefore)
+		countBefore := len(todosBefore)
+
+		// Create project that will fail
+		body := `{"name":"cleanup-project","todos":["cleanup-1","","cleanup-2"]}`
+		resp := sagaReq(t, ts, "POST", "/projects", body)
+		resp.Body.Close()
+
+		// Todos created before failure should be cleaned up
+		listAfter := sagaReq(t, ts, "GET", "/todos", "")
+		defer listAfter.Body.Close()
+		var todosAfter []map[string]any
+		json.NewDecoder(listAfter.Body).Decode(&todosAfter)
+
+		// Compensation should remove partially created todos
+		if len(todosAfter) > countBefore {
+			// Check if cleanup todos are still present
+			for _, todo := range todosAfter {
+				title := todo["title"].(string)
+				if title == "cleanup-1" {
+					t.Fatal("compensation should have removed cleanup-1 todo")
+				}
+			}
+		}
+	})
+
+	t.Run("get_project_by_id", func(t *testing.T) {
+		body := `{"name":"get-test","todos":["gt-1"]}`
+		resp := sagaReq(t, ts, "POST", "/projects", body)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		getResp := sagaReq(t, ts, "GET", fmt.Sprintf("/projects/%d", id), "")
+		defer getResp.Body.Close()
+		if getResp.StatusCode != http.StatusOK {
+			t.Fatalf("get project: expected 200, got %d", getResp.StatusCode)
+		}
+		var project map[string]any
+		json.NewDecoder(getResp.Body).Decode(&project)
+		if project["name"] != "get-test" {
+			t.Fatalf("wrong project name: %v", project["name"])
+		}
+	})
+
+	t.Run("list_projects", func(t *testing.T) {
+		resp := sagaReq(t, ts, "GET", "/projects", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list projects: expected 200, got %d", resp.StatusCode)
+		}
+		var projects []map[string]any
+		json.NewDecoder(resp.Body).Decode(&projects)
+		if len(projects) == 0 {
+			t.Fatal("should have at least one project")
+		}
+	})
+
+	t.Run("saga_execution_history", func(t *testing.T) {
+		resp := sagaReq(t, ts, "GET", "/sagas", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("saga history: expected 200, got %d", resp.StatusCode)
+		}
+		var sagas []map[string]any
+		json.NewDecoder(resp.Body).Decode(&sagas)
+		if len(sagas) == 0 {
+			t.Fatal("should have saga execution history")
+		}
+		// Check saga result has required fields
+		saga := sagas[0]
+		if _, ok := saga["success"]; !ok {
+			t.Fatal("saga result missing 'success' field")
+		}
+		if _, ok := saga["steps_completed"]; !ok {
+			t.Fatal("saga result missing 'steps_completed' field")
+		}
+	})
+
+	t.Run("saga_result_has_failed_step_on_error", func(t *testing.T) {
+		// Create a failing project first
+		body := `{"name":"track-fail","todos":["ok",""]}`
+		resp := sagaReq(t, ts, "POST", "/projects", body)
+		resp.Body.Close()
+
+		// Check saga history
+		histResp := sagaReq(t, ts, "GET", "/sagas", "")
+		defer histResp.Body.Close()
+		var sagas []map[string]any
+		json.NewDecoder(histResp.Body).Decode(&sagas)
+
+		found := false
+		for _, s := range sagas {
+			if s["success"] == false {
+				found = true
+				if s["failed_step"] == nil || s["failed_step"] == "" {
+					t.Fatal("failed saga should have failed_step")
+				}
+			}
+		}
+		if !found {
+			t.Fatal("should have at least one failed saga")
+		}
+	})
+
+	t.Run("original_todo_crud_unaffected", func(t *testing.T) {
+		// Create todo directly
+		resp := sagaReq(t, ts, "POST", "/todos", `{"title":"direct","done":false}`)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("direct todo create: expected 201, got %d", resp.StatusCode)
+		}
+
+		// List
+		listResp := sagaReq(t, ts, "GET", "/todos", "")
+		defer listResp.Body.Close()
+		if listResp.StatusCode != http.StatusOK {
+			t.Fatalf("list todos: expected 200, got %d", listResp.StatusCode)
+		}
+	})
+}

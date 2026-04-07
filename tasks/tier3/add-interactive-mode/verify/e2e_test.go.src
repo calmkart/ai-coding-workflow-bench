@@ -1,0 +1,113 @@
+package main
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("repl_add_and_list", func(t *testing.T) {
+		input := "add test task\nlist\nexit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+
+		out := output.String()
+		if !strings.Contains(out, "Added task") {
+			t.Fatalf("expected 'Added task' in output, got: %s", out)
+		}
+		if !strings.Contains(out, "test task") {
+			t.Fatalf("expected 'test task' in output, got: %s", out)
+		}
+	})
+
+	t.Run("repl_help", func(t *testing.T) {
+		input := "help\nexit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+
+		out := output.String()
+		if !strings.Contains(out, "add") {
+			t.Fatalf("help should mention 'add' command, got: %s", out)
+		}
+		if !strings.Contains(out, "list") {
+			t.Fatalf("help should mention 'list' command, got: %s", out)
+		}
+		if !strings.Contains(out, "done") {
+			t.Fatalf("help should mention 'done' command, got: %s", out)
+		}
+	})
+
+	t.Run("repl_exit", func(t *testing.T) {
+		input := "exit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+		// Should not hang - just return
+	})
+
+	t.Run("repl_quit", func(t *testing.T) {
+		input := "quit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+		// Should not hang
+	})
+
+	t.Run("repl_empty_input", func(t *testing.T) {
+		input := "\n\n\nexit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+		// Should handle empty lines gracefully
+	})
+
+	t.Run("repl_unknown_command", func(t *testing.T) {
+		input := "foobar\nexit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+
+		out := output.String()
+		if !strings.Contains(strings.ToLower(out), "unknown") {
+			t.Fatalf("expected 'unknown' error for bad command, got: %s", out)
+		}
+	})
+
+	t.Run("repl_prompt", func(t *testing.T) {
+		input := "exit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+
+		out := output.String()
+		if !strings.Contains(out, "> ") {
+			t.Fatalf("expected prompt '> ' in output, got: %s", out)
+		}
+	})
+
+	t.Run("repl_done_command", func(t *testing.T) {
+		input := "add complete me\ndone 1\nlist\nexit\n"
+		reader := strings.NewReader(input)
+		var output bytes.Buffer
+
+		RunREPL(reader, &output)
+
+		out := output.String()
+		if !strings.Contains(out, "done") || !strings.Contains(out, "x") {
+			// The done task should show as completed in list
+			if !strings.Contains(out, "complete me") {
+				t.Fatalf("expected task in output, got: %s", out)
+			}
+		}
+	})
+}

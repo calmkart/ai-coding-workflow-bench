@@ -1,0 +1,95 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Seed mixed todos
+	for _, td := range []string{
+		`{"title":"buy milk","done":true}`,
+		`{"title":"read book","done":false}`,
+		`{"title":"clean house","done":true}`,
+		`{"title":"write code","done":false}`,
+		`{"title":"exercise","done":true}`,
+	} {
+		resp, _ := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(td))
+		resp.Body.Close()
+	}
+
+	t.Run("filter_done_true", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?done=true")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		var todos []map[string]any
+		json.NewDecoder(resp.Body).Decode(&todos)
+
+		if len(todos) != 3 {
+			t.Fatalf("done=true: expected 3, got %d", len(todos))
+		}
+		for _, td := range todos {
+			if td["done"] != true {
+				t.Fatalf("expected done=true, got %v", td["done"])
+			}
+		}
+	})
+
+	t.Run("filter_done_false", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?done=false")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		var todos []map[string]any
+		json.NewDecoder(resp.Body).Decode(&todos)
+
+		if len(todos) != 2 {
+			t.Fatalf("done=false: expected 2, got %d", len(todos))
+		}
+		for _, td := range todos {
+			if td["done"] != false {
+				t.Fatalf("expected done=false, got %v", td["done"])
+			}
+		}
+	})
+
+	t.Run("no_filter_returns_all", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		var todos []map[string]any
+		json.NewDecoder(resp.Body).Decode(&todos)
+
+		if len(todos) != 5 {
+			t.Fatalf("no filter: expected 5, got %d", len(todos))
+		}
+	})
+
+	t.Run("invalid_done_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?done=maybe")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid done: expected 400, got %d", resp.StatusCode)
+		}
+	})
+}

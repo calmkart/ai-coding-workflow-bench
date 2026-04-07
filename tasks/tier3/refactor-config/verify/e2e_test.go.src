@@ -1,0 +1,99 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("default_config_values", func(t *testing.T) {
+		cfg := LoadConfig()
+		if cfg.Port != 8080 {
+			t.Fatalf("expected default port 8080, got %d", cfg.Port)
+		}
+		if cfg.ReadTimeout != 5*time.Second {
+			t.Fatalf("expected default read timeout 5s, got %v", cfg.ReadTimeout)
+		}
+		if cfg.WriteTimeout != 10*time.Second {
+			t.Fatalf("expected default write timeout 10s, got %v", cfg.WriteTimeout)
+		}
+		if cfg.DefaultPageSize != 10 {
+			t.Fatalf("expected default page size 10, got %d", cfg.DefaultPageSize)
+		}
+		if cfg.MaxPageSize != 100 {
+			t.Fatalf("expected max page size 100, got %d", cfg.MaxPageSize)
+		}
+		if cfg.MaxTitleLength != 200 {
+			t.Fatalf("expected max title length 200, got %d", cfg.MaxTitleLength)
+		}
+	})
+
+	t.Run("env_overrides", func(t *testing.T) {
+		os.Setenv("TODO_PORT", "9090")
+		os.Setenv("TODO_DEFAULT_PAGE_SIZE", "20")
+		defer os.Unsetenv("TODO_PORT")
+		defer os.Unsetenv("TODO_DEFAULT_PAGE_SIZE")
+
+		cfg := LoadConfig()
+		if cfg.Port != 9090 {
+			t.Fatalf("expected port 9090 from env, got %d", cfg.Port)
+		}
+		if cfg.DefaultPageSize != 20 {
+			t.Fatalf("expected page size 20 from env, got %d", cfg.DefaultPageSize)
+		}
+	})
+
+	t.Run("validate_catches_invalid", func(t *testing.T) {
+		cfg := Config{Port: -1}
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("expected validation error for port -1")
+		}
+
+		cfg2 := Config{Port: 8080, MaxPageSize: 0}
+		if err := cfg2.Validate(); err == nil {
+			t.Fatal("expected validation error for max page size 0")
+		}
+	})
+
+	t.Run("api_still_works", func(t *testing.T) {
+		mux := setupRouter()
+		ts := httptest.NewServer(mux)
+		defer ts.Close()
+
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"config test"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "config test" {
+			t.Fatalf("expected title 'config test', got %v", todo["title"])
+		}
+	})
+
+	t.Run("health_check", func(t *testing.T) {
+		mux := setupRouter()
+		ts := httptest.NewServer(mux)
+		defer ts.Close()
+
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}

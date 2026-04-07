@@ -1,0 +1,98 @@
+package statemgr
+
+import (
+	"errors"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("resource_has_version", func(t *testing.T) {
+		r := Resource{Name: "test", ResourceVersion: 1}
+		if r.ResourceVersion != 1 {
+			t.Fatalf("expected version 1, got %d", r.ResourceVersion)
+		}
+	})
+
+	t.Run("version_increments_on_put", func(t *testing.T) {
+		store := NewStore()
+		r := &Resource{Name: "test", Spec: ResourceSpec{Replicas: 1}}
+		store.Put(r)
+
+		got, _ := store.Get("test")
+		v1 := got.ResourceVersion
+
+		got.Status.Phase = "Running"
+		store.Put(got)
+
+		got2, _ := store.Get("test")
+		if got2.ResourceVersion <= v1 {
+			t.Fatalf("expected version > %d, got %d", v1, got2.ResourceVersion)
+		}
+	})
+
+	t.Run("conflict_detected", func(t *testing.T) {
+		store := NewStore()
+		r := &Resource{Name: "test", Spec: ResourceSpec{Replicas: 1}}
+		store.Put(r)
+
+		// Get two copies
+		copy1, _ := store.Get("test")
+		copy2, _ := store.Get("test")
+
+		// Update copy1
+		copy1.Status.Phase = "Running"
+		err := store.Put(copy1)
+		if err != nil {
+			t.Fatalf("first put should succeed: %v", err)
+		}
+
+		// Update copy2 (stale version) should conflict
+		copy2.Status.Phase = "Failed"
+		err = store.Put(copy2)
+		if !errors.Is(err, ErrConflict) {
+			t.Fatalf("expected ErrConflict, got %v", err)
+		}
+	})
+
+	t.Run("reconciler_retries_on_conflict", func(t *testing.T) {
+		store := NewStore()
+		r := &Resource{
+			Name:   "retry-test",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		}
+		store.Put(r)
+
+		rec := NewSimpleReconciler(store)
+		result := rec.Reconcile("retry-test")
+
+		// Should succeed despite potential conflicts (internal retry)
+		got, _ := store.Get("retry-test")
+		if got.Status.Phase != "Running" {
+			t.Fatalf("expected Running, got %s", got.Status.Phase)
+		}
+		_ = result
+	})
+
+	t.Run("normal_reconcile_still_works", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "normal",
+			Spec:   ResourceSpec{Replicas: 2, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		for i := 0; i < 10; i++ {
+			result := rec.Reconcile("normal")
+			if !result.Requeue {
+				break
+			}
+		}
+
+		got, _ := store.Get("normal")
+		if got.Status.ReadyReplicas != 2 {
+			t.Fatalf("expected 2 ready, got %d", got.Status.ReadyReplicas)
+		}
+	})
+}

@@ -1,0 +1,53 @@
+package strkit
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("empty_candidates_returns_false", func(t *testing.T) {
+		if ContainsAny("hello", []string{}) {
+			t.Fatal("ContainsAny with empty candidates should return false")
+		}
+	})
+
+	t.Run("nil_candidates_returns_false", func(t *testing.T) {
+		if ContainsAny("hello", nil) {
+			t.Fatal("ContainsAny with nil candidates should return false")
+		}
+	})
+
+	t.Run("matching_candidate_returns_true", func(t *testing.T) {
+		if !ContainsAny("hello world", []string{"world"}) {
+			t.Fatal("expected true when candidate matches")
+		}
+	})
+
+	t.Run("no_matching_candidate_returns_false", func(t *testing.T) {
+		if ContainsAny("hello world", []string{"foo", "bar"}) {
+			t.Fatal("expected false when no candidate matches")
+		}
+	})
+
+	t.Run("empty_string_with_empty_candidate", func(t *testing.T) {
+		if !ContainsAny("", []string{""}) {
+			t.Fatal("empty string contains empty string")
+		}
+	})
+
+	t.Run("empty_string_with_nonempty_candidates", func(t *testing.T) {
+		if ContainsAny("", []string{"hello"}) {
+			t.Fatal("empty string does not contain 'hello'")
+		}
+	})
+
+	t.Run("multiple_candidates_first_matches", func(t *testing.T) {
+		if !ContainsAny("abc", []string{"a", "d", "e"}) {
+			t.Fatal("expected true when first candidate matches")
+		}
+	})
+
+	t.Run("multiple_candidates_last_matches", func(t *testing.T) {
+		if !ContainsAny("abc", []string{"d", "e", "c"}) {
+			t.Fatal("expected true when last candidate matches")
+		}
+	})
+}

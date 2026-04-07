@@ -1,0 +1,28 @@
+id: "tier3/add-event-recording"
+name: "添加事件记录器"
+tier: 3
+type: "reconciler"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-EVT-01
+    category: observability
+    name: "无事件记录"
+    severity: medium
+    description: "reconcile 过程无记录，需要添加 EventRecorder 接口"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 EventRecorder 接口记录 reconcile 事件"
+
+code_smells:
+  - "reconcile 过程无任何日志或事件"
+  - "问题诊断困难"
+
+metadata:
+  files_to_modify: ["reconciler.go"]
+  tags: ["feature", "reconciler", "events"]

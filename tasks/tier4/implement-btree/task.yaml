@@ -1,0 +1,38 @@
+id: "tier4/implement-btree"
+name: "实现 B-tree 数据结构"
+tier: 4
+type: "library"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type BTree[K, V any] struct"
+  - "func NewBTree[K, V any](order int, less func(K, K) bool) *BTree[K, V]"
+  - "func (t *BTree[K, V]) Insert(key K, value V)"
+  - "func (t *BTree[K, V]) Search(key K) (V, bool)"
+  - "func (t *BTree[K, V]) Delete(key K) bool"
+  - "func (t *BTree[K, V]) Range(from, to K) []KV[K, V]"
+  - "func (t *BTree[K, V]) Len() int"
+
+verification_targets:
+  - id: VT-BTREE-01
+    category: data_structure
+    name: "无 B-tree 实现"
+    severity: high
+    description: "需要实现完整的泛型 B-tree"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 B-tree 节点分裂和合并"
+  - "实现 Insert 带自动分裂"
+  - "实现 Search 二分查找"
+  - "实现 Delete 带合并/借位"
+  - "实现 Range 范围查询"
+
+code_smells:
+  - "只有空的接口定义，无实现"
+  - "节点结构不完整"
+
+metadata:
+  files_to_modify: ["btree.go"]
+  tags: ["feature", "data-structure", "btree", "generics"]

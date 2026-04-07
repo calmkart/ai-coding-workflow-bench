@@ -1,0 +1,27 @@
+id: "tier2/add-worker-pool"
+name: "实现 Worker Pool"
+tier: 2
+type: "concurrency"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func NewPool(workers int) *Pool"
+
+verification_targets:
+  - id: VT-POOL-01
+    category: concurrency
+    name: "缺少 worker pool"
+    severity: medium
+    description: "需要固定大小的 worker pool"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 Pool{Submit(task), Wait(), Shutdown()}"
+
+code_smells:
+  - "每个任务启动新 goroutine 无法控制并发数"
+
+metadata:
+  files_to_modify: ["pool.go"]
+  tags: ["feature", "concurrency", "worker-pool"]

@@ -1,0 +1,83 @@
+package workerpool
+
+import (
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("submit_and_wait", func(t *testing.T) {
+		p := NewPool(4)
+		var count atomic.Int32
+
+		for i := 0; i < 10; i++ {
+			p.Submit(func() {
+				count.Add(1)
+			})
+		}
+
+		p.Wait()
+
+		if count.Load() != 10 {
+			t.Fatalf("expected 10 tasks done, got %d", count.Load())
+		}
+	})
+
+	t.Run("concurrent_execution", func(t *testing.T) {
+		p := NewPool(4)
+		var maxConcurrent atomic.Int32
+		var current atomic.Int32
+
+		for i := 0; i < 20; i++ {
+			p.Submit(func() {
+				c := current.Add(1)
+				if c > maxConcurrent.Load() {
+					maxConcurrent.Store(c)
+				}
+				time.Sleep(10 * time.Millisecond)
+				current.Add(-1)
+			})
+		}
+
+		p.Wait()
+
+		if maxConcurrent.Load() > 4 {
+			t.Fatalf("max concurrent exceeded 4: %d", maxConcurrent.Load())
+		}
+		if maxConcurrent.Load() < 2 {
+			t.Fatalf("expected some concurrency, got max %d", maxConcurrent.Load())
+		}
+	})
+
+	t.Run("shutdown", func(t *testing.T) {
+		p := NewPool(2)
+		var count atomic.Int32
+
+		p.Submit(func() { count.Add(1) })
+		p.Submit(func() { count.Add(1) })
+		p.Wait()
+		p.Shutdown()
+
+		if count.Load() != 2 {
+			t.Fatalf("expected 2, got %d", count.Load())
+		}
+	})
+
+	t.Run("many_tasks", func(t *testing.T) {
+		p := NewPool(8)
+		var count atomic.Int32
+
+		for i := 0; i < 100; i++ {
+			p.Submit(func() {
+				count.Add(1)
+			})
+		}
+
+		p.Wait()
+
+		if count.Load() != 100 {
+			t.Fatalf("expected 100, got %d", count.Load())
+		}
+	})
+}

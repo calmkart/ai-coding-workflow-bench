@@ -1,0 +1,286 @@
+package gc
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+)
+
+func makeResource(name, kind, uid string, owners []OwnerReference) *Resource {
+	return &Resource{
+		Metadata: Metadata{
+			Name:            name,
+			Kind:            kind,
+			UID:             uid,
+			OwnerReferences: owners,
+		},
+		Spec: map[string]string{},
+	}
+}
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("delete_parent_cascades_to_child", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		parent := makeResource("parent", "Deployment", "uid-1", nil)
+		child := makeResource("child", "Pod", "uid-2", []OwnerReference{
+			{Name: "parent", Kind: "Deployment", UID: "uid-1"},
+		})
+
+		store.Put(parent)
+		store.Put(child)
+
+		// Delete parent
+		store.Delete("parent")
+
+		// Run GC
+		cleaned := gc.CollectOnce()
+
+		// Child should be cleaned up
+		_, childExists := store.Get("child")
+		if childExists && !store.resources["child"].IsDeleting() {
+			t.Fatal("child should be deleted or marked for deletion after parent is deleted")
+		}
+		if cleaned < 1 {
+			t.Fatalf("expected at least 1 resource cleaned, got %d", cleaned)
+		}
+	})
+
+	t.Run("multi_level_cascade", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		grandparent := makeResource("gp", "Deployment", "uid-gp", nil)
+		parent := makeResource("p", "ReplicaSet", "uid-p", []OwnerReference{
+			{Name: "gp", Kind: "Deployment", UID: "uid-gp"},
+		})
+		child := makeResource("c", "Pod", "uid-c", []OwnerReference{
+			{Name: "p", Kind: "ReplicaSet", UID: "uid-p"},
+		})
+
+		store.Put(grandparent)
+		store.Put(parent)
+		store.Put(child)
+
+		// Delete grandparent
+		store.Delete("gp")
+
+		// May need multiple GC cycles for cascading
+		for i := 0; i < 5; i++ {
+			gc.CollectOnce()
+		}
+
+		_, pExists := store.Get("p")
+		_, cExists := store.Get("c")
+
+		// Both should be cleaned up eventually
+		if pExists && !mustGetResource(store, "p").IsDeleting() {
+			t.Fatal("parent should be deleted after grandparent is deleted")
+		}
+		if cExists && !mustGetResource(store, "c").IsDeleting() {
+			t.Fatal("child should be deleted after parent cascade")
+		}
+	})
+
+	t.Run("no_owner_resource_preserved", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		standalone := makeResource("standalone", "ConfigMap", "uid-s", nil)
+		store.Put(standalone)
+
+		gc.CollectOnce()
+
+		r, exists := store.Get("standalone")
+		if !exists {
+			t.Fatal("standalone resource should not be deleted")
+		}
+		if r.IsDeleting() {
+			t.Fatal("standalone resource should not be marked for deletion")
+		}
+	})
+
+	t.Run("finalizer_prevents_cleanup", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		parent := makeResource("fp", "Deployment", "uid-fp", nil)
+		child := makeResource("fc", "Pod", "uid-fc", []OwnerReference{
+			{Name: "fp", Kind: "Deployment", UID: "uid-fp"},
+		})
+		child.Metadata.Finalizers = []string{"cleanup-handler"}
+
+		store.Put(parent)
+		store.Put(child)
+
+		store.Delete("fp")
+		gc.CollectOnce()
+
+		// Child should be marked for deletion but not purged (has finalizer)
+		r, exists := store.Get("fc")
+		if !exists {
+			t.Fatal("resource with finalizer should not be purged")
+		}
+		if r != nil && r.IsDeleting() {
+			// This is correct — marked for deletion but not purged
+		}
+		// If still present and not deleting, that's also OK as long as it
+		// gets marked once finalizer is removed
+	})
+
+	t.Run("remove_finalizer_allows_cleanup", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		parent := makeResource("rfp", "Deployment", "uid-rfp", nil)
+		child := makeResource("rfc", "Pod", "uid-rfc", []OwnerReference{
+			{Name: "rfp", Kind: "Deployment", UID: "uid-rfp"},
+		})
+		child.Metadata.Finalizers = []string{"finalizer-1"}
+
+		store.Put(parent)
+		store.Put(child)
+
+		store.Delete("rfp")
+		gc.CollectOnce()
+
+		// Remove finalizer
+		r, _ := store.Get("rfc")
+		if r != nil {
+			r.Metadata.Finalizers = nil
+			store.Put(r)
+		}
+
+		// GC again
+		gc.CollectOnce()
+
+		_, exists := store.Get("rfc")
+		if exists {
+			r2, _ := store.Get("rfc")
+			if r2 != nil && !r2.IsDeleting() {
+				t.Fatal("resource without finalizer should be cleaned up")
+			}
+		}
+	})
+
+	t.Run("gc_run_periodic", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		parent := makeResource("periodic-p", "Deployment", "uid-pp", nil)
+		child := makeResource("periodic-c", "Pod", "uid-pc", []OwnerReference{
+			{Name: "periodic-p", Kind: "Deployment", UID: "uid-pp"},
+		})
+
+		store.Put(parent)
+		store.Put(child)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		go gc.Run(ctx)
+
+		store.Delete("periodic-p")
+
+		time.Sleep(2 * time.Second)
+
+		// Child should eventually be cleaned
+		r, exists := store.Get("periodic-c")
+		if exists && r != nil && !r.IsDeleting() {
+			t.Fatal("periodic GC should eventually clean up orphan")
+		}
+	})
+
+	t.Run("owner_uid_must_match", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		// Parent has uid-x, but child references uid-y (wrong UID)
+		parent := makeResource("match-p", "Deployment", "uid-x", nil)
+		child := makeResource("match-c", "Pod", "uid-mc", []OwnerReference{
+			{Name: "match-p", Kind: "Deployment", UID: "uid-y"}, // wrong UID!
+		})
+
+		store.Put(parent)
+		store.Put(child)
+
+		gc.CollectOnce()
+
+		// The child's owner UID doesn't match the parent's UID,
+		// so it should be treated as an orphan
+		r, exists := store.Get("match-c")
+		if exists && r != nil && !r.IsDeleting() {
+			// child references a UID that doesn't exist, should be cleaned
+		}
+	})
+
+	t.Run("concurrent_gc_safety", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		for i := 0; i < 20; i++ {
+			uid := string(rune('a' + i))
+			r := makeResource("res-"+uid, "Pod", "uid-"+uid, nil)
+			store.Put(r)
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				gc.CollectOnce()
+			}()
+		}
+		wg.Wait()
+	})
+
+	t.Run("multiple_owners", func(t *testing.T) {
+		store := NewStore()
+		gc := NewGarbageCollector(store)
+
+		owner1 := makeResource("o1", "Deployment", "uid-o1", nil)
+		owner2 := makeResource("o2", "Deployment", "uid-o2", nil)
+		child := makeResource("multi-c", "Pod", "uid-multi", []OwnerReference{
+			{Name: "o1", Kind: "Deployment", UID: "uid-o1"},
+			{Name: "o2", Kind: "Deployment", UID: "uid-o2"},
+		})
+
+		store.Put(owner1)
+		store.Put(owner2)
+		store.Put(child)
+
+		// Delete only one owner
+		store.Delete("o1")
+		gc.CollectOnce()
+
+		// Child should NOT be deleted (still has one valid owner)
+		r, exists := store.Get("multi-c")
+		if !exists {
+			t.Fatal("child with remaining owner should not be deleted")
+		}
+		if r.IsDeleting() {
+			t.Fatal("child with remaining owner should not be marked for deletion")
+		}
+
+		// Delete second owner
+		store.Delete("o2")
+		gc.CollectOnce()
+
+		// Now child should be cleaned up
+		r2, exists2 := store.Get("multi-c")
+		if exists2 && r2 != nil && !r2.IsDeleting() {
+			t.Fatal("child with no remaining owners should be cleaned up")
+		}
+	})
+}
+
+func mustGetResource(store *Store, name string) *Resource {
+	r, _ := store.Get(name)
+	if r == nil {
+		return &Resource{}
+	}
+	return r
+}

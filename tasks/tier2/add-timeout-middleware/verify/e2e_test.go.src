@@ -1,0 +1,57 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("normal_request_succeeds", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"test","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("slow_request_times_out", func(t *testing.T) {
+		client := &http.Client{Timeout: 10 * time.Second}
+		start := time.Now()
+		resp, err := client.Get(ts.URL + "/slow")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		elapsed := time.Since(start)
+
+		// Should time out in about 5 seconds, not 10
+		if elapsed > 8*time.Second {
+			t.Fatalf("request took too long: %v (no timeout middleware?)", elapsed)
+		}
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("list_not_affected", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}

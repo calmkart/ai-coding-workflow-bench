@@ -1,0 +1,82 @@
+package processor
+
+import (
+	"errors"
+	"sort"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("no_deadlock_on_panic", func(t *testing.T) {
+		done := make(chan struct{})
+		go func() {
+			// Include a "panic" item among normal items
+			ProcessAll([]string{"hello", "panic", "world"})
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Success - didn't deadlock
+		case <-time.After(5 * time.Second):
+			t.Fatal("ProcessAll deadlocked - WaitGroup leak")
+		}
+	})
+
+	t.Run("returns_error_on_panic", func(t *testing.T) {
+		_, err := ProcessAll([]string{"hello", "panic", "world"})
+		if err == nil {
+			t.Fatal("expected error when item panics")
+		}
+	})
+
+	t.Run("normal_items_processed", func(t *testing.T) {
+		results, _ := ProcessAll([]string{"hello", "panic", "world"})
+		sort.Strings(results)
+		// At least the non-panic items should be processed
+		if len(results) < 2 {
+			t.Fatalf("expected at least 2 results, got %d: %v", len(results), results)
+		}
+	})
+
+	t.Run("all_normal_succeed", func(t *testing.T) {
+		results, err := ProcessAll([]string{"a", "b", "c"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sort.Strings(results)
+		if len(results) != 3 || results[0] != "A" || results[1] != "B" || results[2] != "C" {
+			t.Fatalf("expected [A B C], got %v", results)
+		}
+	})
+
+	t.Run("process_batch_no_deadlock", func(t *testing.T) {
+		done := make(chan struct{})
+		go func() {
+			ProcessBatch([]string{"a", "b"}, func(s string) (string, error) {
+				if s == "b" {
+					return "", errors.New("fail")
+				}
+				return s, nil
+			})
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("ProcessBatch deadlocked")
+		}
+	})
+
+	t.Run("empty_input", func(t *testing.T) {
+		results, err := ProcessAll(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 0 {
+			t.Fatalf("expected 0, got %d", len(results))
+		}
+	})
+}

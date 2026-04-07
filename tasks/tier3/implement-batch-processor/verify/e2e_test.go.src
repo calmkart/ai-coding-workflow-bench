@@ -1,0 +1,170 @@
+package batcher
+
+import (
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("flush_on_batch_size", func(t *testing.T) {
+		var batches [][]int
+		var mu sync.Mutex
+
+		bp := NewBatchProcessor[int](5, time.Minute, func(batch []int) error {
+			mu.Lock()
+			cp := make([]int, len(batch))
+			copy(cp, batch)
+			batches = append(batches, cp)
+			mu.Unlock()
+			return nil
+		})
+
+		for i := 0; i < 5; i++ {
+			bp.Add(i)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+		if len(batches) != 1 {
+			t.Fatalf("expected 1 batch, got %d", len(batches))
+		}
+		if len(batches[0]) != 5 {
+			t.Fatalf("expected batch size 5, got %d", len(batches[0]))
+		}
+	})
+
+	t.Run("flush_on_timeout", func(t *testing.T) {
+		var batches [][]string
+		var mu sync.Mutex
+
+		bp := NewBatchProcessor[string](100, 100*time.Millisecond, func(batch []string) error {
+			mu.Lock()
+			cp := make([]string, len(batch))
+			copy(cp, batch)
+			batches = append(batches, cp)
+			mu.Unlock()
+			return nil
+		})
+
+		bp.Add("a")
+		bp.Add("b")
+
+		// Wait for timeout
+		time.Sleep(300 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+		if len(batches) != 1 {
+			t.Fatalf("expected 1 batch from timeout, got %d", len(batches))
+		}
+		if len(batches[0]) != 2 {
+			t.Fatalf("expected 2 items, got %d", len(batches[0]))
+		}
+
+		bp.Close()
+	})
+
+	t.Run("close_flushes_remaining", func(t *testing.T) {
+		var processedCount atomic.Int32
+
+		bp := NewBatchProcessor[int](100, time.Minute, func(batch []int) error {
+			processedCount.Add(int32(len(batch)))
+			return nil
+		})
+
+		bp.Add(1)
+		bp.Add(2)
+		bp.Add(3)
+
+		bp.Close()
+
+		if processedCount.Load() != 3 {
+			t.Fatalf("expected 3 items processed on close, got %d", processedCount.Load())
+		}
+	})
+
+	t.Run("manual_flush", func(t *testing.T) {
+		var processedCount atomic.Int32
+
+		bp := NewBatchProcessor[int](100, time.Minute, func(batch []int) error {
+			processedCount.Add(int32(len(batch)))
+			return nil
+		})
+
+		bp.Add(1)
+		bp.Add(2)
+		bp.Flush()
+
+		if processedCount.Load() != 2 {
+			t.Fatalf("expected 2 after flush, got %d", processedCount.Load())
+		}
+
+		bp.Close()
+	})
+
+	t.Run("multiple_batches", func(t *testing.T) {
+		var batchCount atomic.Int32
+
+		bp := NewBatchProcessor[int](3, time.Minute, func(batch []int) error {
+			batchCount.Add(1)
+			return nil
+		})
+
+		for i := 0; i < 9; i++ {
+			bp.Add(i)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		if batchCount.Load() != 3 {
+			t.Fatalf("expected 3 batches, got %d", batchCount.Load())
+		}
+
+		bp.Close()
+	})
+
+	t.Run("concurrent_add", func(t *testing.T) {
+		var totalItems atomic.Int32
+
+		bp := NewBatchProcessor[int](10, 50*time.Millisecond, func(batch []int) error {
+			totalItems.Add(int32(len(batch)))
+			return nil
+		})
+
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 10; j++ {
+					bp.Add(id*10 + j)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		bp.Close()
+
+		if totalItems.Load() != 100 {
+			t.Fatalf("expected 100 total items, got %d", totalItems.Load())
+		}
+	})
+
+	t.Run("empty_close", func(t *testing.T) {
+		called := false
+		bp := NewBatchProcessor[int](10, time.Second, func(batch []int) error {
+			called = true
+			return nil
+		})
+
+		bp.Close()
+
+		if called {
+			t.Fatal("process should not be called for empty batch on close")
+		}
+	})
+}

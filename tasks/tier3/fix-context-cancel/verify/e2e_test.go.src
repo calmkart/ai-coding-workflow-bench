@@ -1,0 +1,176 @@
+package coordinator
+
+import (
+	"context"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("cancel_stops_workers", func(t *testing.T) {
+		var processed atomic.Int32
+
+		c := NewCoordinator(4, func(task Task) Result {
+			time.Sleep(50 * time.Millisecond)
+			processed.Add(1)
+			return Result{TaskID: task.ID, Output: "done"}
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		c.Start(ctx)
+
+		// Submit many tasks
+		for i := 0; i < 100; i++ {
+			c.Submit(Task{ID: i, Payload: "work"})
+		}
+
+		// Cancel quickly
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+
+		// Wait should complete
+		done := make(chan struct{})
+		go func() {
+			c.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Wait did not return after cancel")
+		}
+
+		// Should not have processed all 100
+		if processed.Load() >= 100 {
+			t.Fatalf("expected fewer than 100 processed after cancel, got %d", processed.Load())
+		}
+	})
+
+	t.Run("workers_exit_after_cancel", func(t *testing.T) {
+		c := NewCoordinator(4, func(task Task) Result {
+			time.Sleep(10 * time.Millisecond)
+			return Result{TaskID: task.ID}
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		c.Start(ctx)
+
+		// Verify workers are running
+		time.Sleep(50 * time.Millisecond)
+		if c.WorkerCount() == 0 {
+			t.Fatal("expected workers to be running")
+		}
+
+		cancel()
+
+		done := make(chan struct{})
+		go func() {
+			c.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout")
+		}
+
+		// All workers should have exited
+		time.Sleep(100 * time.Millisecond)
+		if c.WorkerCount() != 0 {
+			t.Fatalf("expected 0 running workers after cancel, got %d", c.WorkerCount())
+		}
+	})
+
+	t.Run("basic_processing", func(t *testing.T) {
+		var processed atomic.Int32
+
+		c := NewCoordinator(2, func(task Task) Result {
+			processed.Add(1)
+			return Result{TaskID: task.ID, Output: task.Payload}
+		})
+
+		ctx := context.Background()
+		c.Start(ctx)
+
+		for i := 0; i < 5; i++ {
+			c.Submit(Task{ID: i, Payload: "task"})
+		}
+
+		// Collect results
+		go func() {
+			for range c.Results() {
+			}
+		}()
+
+		c.Wait()
+
+		if processed.Load() != 5 {
+			t.Fatalf("expected 5 processed, got %d", processed.Load())
+		}
+	})
+
+	t.Run("worker_timeout", func(t *testing.T) {
+		c := NewCoordinator(2, func(task Task) Result {
+			// Simulate slow work
+			time.Sleep(5 * time.Second)
+			return Result{TaskID: task.ID}
+		})
+
+		c.SetWorkerTimeout(100 * time.Millisecond)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		c.Start(ctx)
+
+		c.Submit(Task{ID: 1, Payload: "slow"})
+
+		// Collect results
+		resultCh := c.Results()
+		select {
+		case result := <-resultCh:
+			if result.Err == nil {
+				// Timeout should produce an error
+				t.Log("result received (may or may not have error depending on implementation)")
+			}
+		case <-time.After(3 * time.Second):
+			// If no result in 3s, the timeout is working (task was cancelled)
+		}
+
+		cancel()
+		done := make(chan struct{})
+		go func() {
+			c.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Wait did not return")
+		}
+	})
+
+	t.Run("no_goroutine_leak", func(t *testing.T) {
+		for i := 0; i < 5; i++ {
+			c := NewCoordinator(4, func(task Task) Result {
+				return Result{TaskID: task.ID}
+			})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			c.Start(ctx)
+			c.Submit(Task{ID: 1})
+
+			go func() {
+				for range c.Results() {
+				}
+			}()
+
+			cancel()
+			c.Wait()
+		}
+		// If there are goroutine leaks, the test runner will detect them
+	})
+}

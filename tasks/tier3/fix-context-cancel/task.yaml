@@ -1,0 +1,30 @@
+id: "tier3/fix-context-cancel"
+name: "修复 context 取消不传播"
+tier: 3
+type: "concurrency"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "type Coordinator struct"
+  - "func NewCoordinator() *Coordinator"
+
+verification_targets:
+  - id: VT-CTX-01
+    category: correctness
+    name: "context 取消不传播"
+    severity: critical
+    description: "外层 context 取消不传播到内部 goroutine，导致泄漏"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "修复 context 取消传播链，确保所有 goroutine 响应取消"
+
+code_smells:
+  - "goroutine 使用 context.Background() 而非父 context"
+  - "select 中缺少 ctx.Done() 分支"
+  - "取消后 goroutine 继续运行"
+
+metadata:
+  files_to_modify: ["coordinator.go"]
+  tags: ["bugfix", "concurrency", "context"]

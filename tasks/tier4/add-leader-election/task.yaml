@@ -1,0 +1,35 @@
+id: "tier4/add-leader-election"
+name: "实现 Leader Election (Lease 模式)"
+tier: 4
+type: "reconciler"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type LeaderElector struct"
+  - "type Lease struct"
+  - "type LeaseStore interface"
+  - "func NewLeaderElector(id string, store LeaseStore, opts LeaderOpts) *LeaderElector"
+  - "func (le *LeaderElector) Run(ctx context.Context)"
+  - "func (le *LeaderElector) IsLeader() bool"
+
+verification_targets:
+  - id: VT-LE-01
+    category: distributed_system
+    name: "无 Leader Election"
+    severity: critical
+    description: "多副本无协调，需要 leader election"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 Lease 资源和 LeaseStore"
+  - "实现 leader 竞选和续期"
+  - "实现 leader 变更回调"
+
+code_smells:
+  - "多个 reconciler 可能同时活跃"
+  - "没有 leader/standby 概念"
+
+metadata:
+  files_to_modify: ["lease.go", "election.go"]
+  tags: ["feature", "distributed-system", "leader-election"]

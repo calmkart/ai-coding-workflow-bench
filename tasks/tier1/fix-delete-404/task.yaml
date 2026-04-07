@@ -1,0 +1,27 @@
+id: "tier1/fix-delete-404"
+name: "修复 DELETE 不存在资源的状态码"
+tier: 1
+type: "http-server"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-HTTP-01
+    category: http
+    name: "错误的错误状态码"
+    severity: high
+    description: "DELETE 不存在的 todo 应返回 404 而非 500"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 DELETE /todos/{id} 删除不存在的 ID 时返回 404 Not Found"
+
+code_smells:
+  - "deleteTodo 在找不到 ID 时返回 500 而非 404"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["bugfix", "error-handling"]

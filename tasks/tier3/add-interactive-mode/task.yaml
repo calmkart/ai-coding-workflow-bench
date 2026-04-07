@@ -1,0 +1,28 @@
+id: "tier3/add-interactive-mode"
+name: "添加交互式 REPL 模式"
+tier: 3
+type: "cli"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "CLI: taskcli repl"
+
+verification_targets:
+  - id: VT-REPL-01
+    category: feature
+    name: "无交互模式"
+    severity: medium
+    description: "CLI 只支持非交互模式，需要添加 REPL"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 REPL 模式：读命令 -> 执行 -> 显示结果循环"
+
+code_smells:
+  - "每个操作需要重新运行命令"
+  - "无交互体验"
+
+metadata:
+  files_to_modify: ["main.go"]
+  tags: ["feature", "cli", "repl"]

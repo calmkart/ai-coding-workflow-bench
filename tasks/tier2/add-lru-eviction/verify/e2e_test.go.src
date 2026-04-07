@@ -1,0 +1,78 @@
+package cachebox
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("capacity_limit", func(t *testing.T) {
+		c := NewLRUCache[string, int](3)
+		c.Set("a", 1)
+		c.Set("b", 2)
+		c.Set("c", 3)
+		c.Set("d", 4) // Should evict "a"
+
+		if c.Len() != 3 {
+			t.Fatalf("expected len 3, got %d", c.Len())
+		}
+
+		_, ok := c.Get("a")
+		if ok {
+			t.Fatal("expected 'a' to be evicted")
+		}
+	})
+
+	t.Run("lru_order", func(t *testing.T) {
+		c := NewLRUCache[string, int](3)
+		c.Set("a", 1)
+		c.Set("b", 2)
+		c.Set("c", 3)
+
+		// Access "a" to make it recently used
+		c.Get("a")
+
+		// Add "d" - should evict "b" (least recently used)
+		c.Set("d", 4)
+
+		_, ok := c.Get("b")
+		if ok {
+			t.Fatal("expected 'b' to be evicted")
+		}
+
+		// "a" should still exist
+		val, ok := c.Get("a")
+		if !ok || val != 1 {
+			t.Fatalf("expected 'a'=1, got %d (ok=%v)", val, ok)
+		}
+	})
+
+	t.Run("update_existing", func(t *testing.T) {
+		c := NewLRUCache[string, int](2)
+		c.Set("a", 1)
+		c.Set("b", 2)
+		c.Set("a", 10) // Update, not add
+
+		if c.Len() != 2 {
+			t.Fatalf("expected len 2, got %d", c.Len())
+		}
+
+		val, ok := c.Get("a")
+		if !ok || val != 10 {
+			t.Fatalf("expected 'a'=10, got %d (ok=%v)", val, ok)
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		c := NewLRUCache[string, int](3)
+		c.Set("a", 1)
+		c.Set("b", 2)
+		c.Delete("a")
+
+		if c.Len() != 1 {
+			t.Fatalf("expected len 1, got %d", c.Len())
+		}
+
+		_, ok := c.Get("a")
+		if ok {
+			t.Fatal("expected deleted")
+		}
+	})
+}

@@ -1,0 +1,154 @@
+package statemgr
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("dependent_resource_struct", func(t *testing.T) {
+		dr := DependentResource{
+			Name:      "app1-config",
+			Kind:      "Config",
+			DependsOn: "app1-secret",
+		}
+		if dr.Kind != "Config" {
+			t.Fatalf("expected Config, got %s", dr.Kind)
+		}
+	})
+
+	t.Run("reconciler_creates_dependents", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "app1",
+			Kind: "App",
+			Spec: ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewAppReconciler(store)
+
+		// Run reconcile loop
+		for i := 0; i < 30; i++ {
+			result := rec.Reconcile("app1")
+			if !result.Requeue {
+				break
+			}
+			time.Sleep(result.RequeueAfter)
+		}
+
+		// Check that dependent resources were created
+		secret, ok := store.Get("app1-secret")
+		if !ok {
+			t.Fatal("expected secret to be created")
+		}
+		if secret.Kind != "Secret" {
+			t.Fatalf("expected Kind 'Secret', got '%s'", secret.Kind)
+		}
+
+		config, ok := store.Get("app1-config")
+		if !ok {
+			t.Fatal("expected config to be created")
+		}
+		if config.Kind != "Config" {
+			t.Fatalf("expected Kind 'Config', got '%s'", config.Kind)
+		}
+	})
+
+	t.Run("dependency_order", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "app2",
+			Kind: "App",
+			Spec: ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewAppReconciler(store)
+
+		// First reconcile should create secret first (no dependencies)
+		rec.Reconcile("app2")
+
+		// Secret should exist before config
+		_, hasSecret := store.Get("app2-secret")
+		if !hasSecret {
+			t.Fatal("secret should be created first (no dependencies)")
+		}
+	})
+
+	t.Run("ensure_dependents_all_ready", func(t *testing.T) {
+		store := NewStore()
+		parent := &Resource{
+			Name: "app3",
+			Kind: "App",
+			Spec: ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		}
+		store.Put(parent)
+
+		rec := NewAppReconciler(store)
+
+		// Run until complete
+		for i := 0; i < 50; i++ {
+			result := rec.Reconcile("app3")
+			if !result.Requeue {
+				break
+			}
+			time.Sleep(result.RequeueAfter)
+		}
+
+		// All dependents should be ready
+		app, _ := store.Get("app3")
+		if app.Status.Phase != "Running" || app.Status.Message != "All replicas ready" {
+			t.Fatalf("expected app to be ready, got phase=%s msg=%s",
+				app.Status.Phase, app.Status.Message)
+		}
+
+		secret, _ := store.Get("app3-secret")
+		if secret == nil || secret.Status.Phase != "Running" {
+			t.Fatal("secret should be ready")
+		}
+
+		config, _ := store.Get("app3-config")
+		if config == nil || config.Status.Phase != "Running" {
+			t.Fatal("config should be ready")
+		}
+	})
+
+	t.Run("not_found_no_requeue", func(t *testing.T) {
+		store := NewStore()
+		rec := NewAppReconciler(store)
+		result := rec.Reconcile("nonexistent")
+		if result.Requeue {
+			t.Fatal("should not requeue for missing resource")
+		}
+	})
+
+	t.Run("ensure_dependents_function", func(t *testing.T) {
+		store := NewStore()
+		parent := &Resource{Name: "app4", Kind: "App"}
+		store.Put(parent)
+
+		// Secret exists and ready
+		store.Put(&Resource{
+			Name:   "app4-secret",
+			Kind:   "Secret",
+			Status: ResourceStatus{Phase: "Running"},
+		})
+
+		// Config exists and ready
+		store.Put(&Resource{
+			Name:   "app4-config",
+			Kind:   "Config",
+			Status: ResourceStatus{Phase: "Running"},
+		})
+
+		allReady, err := EnsureDependents(store, parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !allReady {
+			t.Fatal("expected all dependents to be ready")
+		}
+	})
+}

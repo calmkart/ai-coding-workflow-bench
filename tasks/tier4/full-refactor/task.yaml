@@ -1,0 +1,37 @@
+id: "tier4/full-refactor"
+name: "完整重构 God Handler"
+tier: 4
+type: "http-server"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-REF-01
+    category: architecture
+    name: "God Handler 模式"
+    severity: critical
+    description: "单文件 500+ 行 handler 包含所有逻辑"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "分离 handler/service/repository 三层"
+  - "提取中间件（logging, recovery, request-id）"
+  - "实现类型化错误处理"
+  - "提取配置管理"
+  - "添加单元测试"
+
+code_smells:
+  - "所有逻辑在一个 handler.go 文件中"
+  - "业务逻辑与 HTTP 处理混合"
+  - "硬编码配置"
+  - "无错误类型化"
+  - "无中间件"
+  - "无日志"
+  - "panic 无恢复"
+
+metadata:
+  files_to_modify: ["handler.go"]
+  tags: ["refactoring", "architecture", "layered"]

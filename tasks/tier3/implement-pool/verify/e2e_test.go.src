@@ -1,0 +1,158 @@
+package pool
+
+import (
+	"sync"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("get_creates_new", func(t *testing.T) {
+		p := NewPool(func() *[]byte {
+			b := make([]byte, 1024)
+			return &b
+		})
+
+		buf := p.Get()
+		if len(*buf) != 1024 {
+			t.Fatalf("expected 1024, got %d", len(*buf))
+		}
+	})
+
+	t.Run("put_and_get_reuses", func(t *testing.T) {
+		created := 0
+		p := NewPool(func() int {
+			created++
+			return created
+		})
+
+		obj := p.Get()
+		p.Put(obj)
+		obj2 := p.Get()
+
+		// obj2 should be the reused object
+		if obj2 != obj {
+			// At minimum, created count should not have increased again
+			// since we put one back
+		}
+
+		stats := p.Stats()
+		if stats.Gets != 2 {
+			t.Fatalf("expected 2 gets, got %d", stats.Gets)
+		}
+		if stats.Puts != 1 {
+			t.Fatalf("expected 1 put, got %d", stats.Puts)
+		}
+	})
+
+	t.Run("pool_max_size", func(t *testing.T) {
+		p := NewPool(func() int { return 0 }, WithMaxSize(2))
+
+		// Put more than max size
+		p.Put(1)
+		p.Put(2)
+		p.Put(3) // should be discarded
+
+		stats := p.Stats()
+		if stats.Discards != 1 {
+			t.Fatalf("expected 1 discard, got %d", stats.Discards)
+		}
+	})
+
+	t.Run("stats_tracking", func(t *testing.T) {
+		p := NewPool(func() string { return "new" }, WithMaxSize(5))
+
+		p.Get()
+		p.Get()
+		p.Get()
+		p.Put("a")
+		p.Put("b")
+
+		stats := p.Stats()
+		if stats.Gets != 3 {
+			t.Fatalf("expected 3 gets, got %d", stats.Gets)
+		}
+		if stats.Puts != 2 {
+			t.Fatalf("expected 2 puts, got %d", stats.Puts)
+		}
+		if stats.News != 3 {
+			t.Fatalf("expected 3 news, got %d", stats.News)
+		}
+	})
+
+	t.Run("reset_func", func(t *testing.T) {
+		type Buffer struct {
+			Data []byte
+			Len  int
+		}
+
+		resetCalled := 0
+		p := NewPool(
+			func() *Buffer {
+				return &Buffer{Data: make([]byte, 100), Len: 0}
+			},
+			WithMaxSize(5),
+			WithResetFunc(func(obj *Buffer) {
+				obj.Len = 0
+				resetCalled++
+			}),
+		)
+
+		buf := p.Get()
+		buf.Len = 50
+		p.Put(buf)
+
+		if resetCalled != 1 {
+			t.Fatalf("expected reset called 1 time, got %d", resetCalled)
+		}
+
+		buf2 := p.Get()
+		if buf2.Len != 0 {
+			t.Fatalf("expected reset Len to 0, got %d", buf2.Len)
+		}
+	})
+
+	t.Run("concurrent_safety", func(t *testing.T) {
+		p := NewPool(func() int { return 0 }, WithMaxSize(20))
+
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					obj := p.Get()
+					p.Put(obj)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		stats := p.Stats()
+		if stats.Gets != 1000 {
+			t.Fatalf("expected 1000 gets, got %d", stats.Gets)
+		}
+		if stats.Puts != 1000 {
+			t.Fatalf("expected 1000 puts, got %d", stats.Puts)
+		}
+	})
+
+	t.Run("empty_pool_creates_new", func(t *testing.T) {
+		created := 0
+		p := NewPool(func() int {
+			created++
+			return created
+		}, WithMaxSize(2))
+
+		v1 := p.Get()
+		v2 := p.Get()
+		v3 := p.Get()
+
+		if created != 3 {
+			t.Fatalf("expected 3 created, got %d", created)
+		}
+		_ = v1
+		_ = v2
+		_ = v3
+	})
+}

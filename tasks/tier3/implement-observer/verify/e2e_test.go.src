@@ -1,0 +1,201 @@
+package eventbus
+
+import (
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("subscribe_and_publish", func(t *testing.T) {
+		eb := NewEventBus()
+		defer eb.Close()
+
+		var received Event
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		eb.Subscribe("user.created", func(e Event) {
+			received = e
+			wg.Done()
+		})
+
+		eb.Publish("user.created", "alice")
+
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for event")
+		}
+
+		if received.Topic != "user.created" {
+			t.Fatalf("expected topic 'user.created', got '%s'", received.Topic)
+		}
+		if received.Data != "alice" {
+			t.Fatalf("expected data 'alice', got %v", received.Data)
+		}
+	})
+
+	t.Run("multiple_subscribers", func(t *testing.T) {
+		eb := NewEventBus()
+		defer eb.Close()
+
+		var count atomic.Int32
+		var wg sync.WaitGroup
+		wg.Add(3)
+
+		for i := 0; i < 3; i++ {
+			eb.Subscribe("order.placed", func(e Event) {
+				count.Add(1)
+				wg.Done()
+			})
+		}
+
+		eb.Publish("order.placed", nil)
+
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout")
+		}
+
+		if count.Load() != 3 {
+			t.Fatalf("expected 3 handlers called, got %d", count.Load())
+		}
+	})
+
+	t.Run("topic_isolation", func(t *testing.T) {
+		eb := NewEventBus()
+		defer eb.Close()
+
+		var called atomic.Bool
+
+		eb.Subscribe("topic.a", func(e Event) {
+			called.Store(true)
+		})
+
+		eb.Publish("topic.b", nil)
+		time.Sleep(100 * time.Millisecond)
+
+		if called.Load() {
+			t.Fatal("handler for topic.a should not be called for topic.b")
+		}
+	})
+
+	t.Run("unsubscribe", func(t *testing.T) {
+		eb := NewEventBus()
+		defer eb.Close()
+
+		var count atomic.Int32
+
+		id := eb.Subscribe("test", func(e Event) {
+			count.Add(1)
+		})
+
+		eb.Publish("test", nil)
+		time.Sleep(100 * time.Millisecond)
+
+		eb.Unsubscribe(id)
+
+		eb.Publish("test", nil)
+		time.Sleep(100 * time.Millisecond)
+
+		if count.Load() != 1 {
+			t.Fatalf("expected 1 call (before unsubscribe), got %d", count.Load())
+		}
+	})
+
+	t.Run("wildcard_subscriber", func(t *testing.T) {
+		eb := NewEventBus()
+		defer eb.Close()
+
+		var topics []string
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		eb.Subscribe("*", func(e Event) {
+			mu.Lock()
+			topics = append(topics, e.Topic)
+			mu.Unlock()
+			wg.Done()
+		})
+
+		eb.Publish("a", nil)
+		eb.Publish("b", nil)
+
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout")
+		}
+
+		if len(topics) != 2 {
+			t.Fatalf("expected 2 topics, got %d", len(topics))
+		}
+	})
+
+	t.Run("publish_sync", func(t *testing.T) {
+		eb := NewEventBus()
+		defer eb.Close()
+
+		var received bool
+
+		eb.Subscribe("sync", func(e Event) {
+			received = true
+		})
+
+		eb.PublishSync("sync", nil)
+
+		if !received {
+			t.Fatal("PublishSync should deliver synchronously")
+		}
+	})
+
+	t.Run("concurrent_publish", func(t *testing.T) {
+		eb := NewEventBus()
+		defer eb.Close()
+
+		var count atomic.Int32
+		eb.Subscribe("count", func(e Event) {
+			count.Add(1)
+		})
+
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 10; j++ {
+					eb.Publish("count", nil)
+				}
+			}()
+		}
+
+		wg.Wait()
+		time.Sleep(500 * time.Millisecond)
+
+		if count.Load() != 100 {
+			t.Fatalf("expected 100, got %d", count.Load())
+		}
+	})
+}

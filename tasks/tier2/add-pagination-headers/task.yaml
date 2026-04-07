@@ -1,0 +1,27 @@
+id: "tier2/add-pagination-headers"
+name: "添加分页响应头"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-PAG-01
+    category: http
+    name: "缺少分页响应头"
+    severity: medium
+    description: "GET /todos 缺少 X-Total-Count 头"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "为 GET /todos 添加 X-Total-Count 和 X-Page、X-Page-Size 响应头"
+
+code_smells:
+  - "listTodos 不返回总数信息，客户端无法判断是否有更多页"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["feature", "pagination", "http-headers"]

@@ -1,0 +1,27 @@
+id: "tier1/fix-query-param"
+name: "修复查询参数解析 panic"
+tier: 1
+type: "http-server"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-ERROR-01
+    category: error_handling
+    name: "未处理的参数错误"
+    severity: critical
+    description: "非法 page_size 参数导致服务器 panic"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 page_size 参数解析错误时的 panic"
+
+code_smells:
+  - "strconv.Atoi 结果未检查导致非法参数 panic"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["bugfix", "input-validation"]

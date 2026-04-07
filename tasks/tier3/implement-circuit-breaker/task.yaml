@@ -1,0 +1,30 @@
+id: "tier3/implement-circuit-breaker"
+name: "实现熔断器模式"
+tier: 3
+type: "library"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type CircuitBreaker struct"
+  - "func NewCircuitBreaker(opts Options) *CircuitBreaker"
+  - "func (cb *CircuitBreaker) Execute(fn func() error) error"
+
+verification_targets:
+  - id: VT-CB-01
+    category: feature
+    name: "无熔断"
+    severity: high
+    description: "需要实现 Closed->Open->HalfOpen 状态机"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现完整的熔断器：状态机、失败计数、超时恢复"
+
+code_smells:
+  - "直接调用可能失败的操作无保护"
+  - "故障传播无限制"
+
+metadata:
+  files_to_modify: ["breaker.go"]
+  tags: ["feature", "pattern", "circuit-breaker"]

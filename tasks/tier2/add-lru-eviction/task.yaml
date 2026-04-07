@@ -1,0 +1,28 @@
+id: "tier2/add-lru-eviction"
+name: "添加 LRU 淘汰"
+tier: 2
+type: "library"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func NewLRUCache[K comparable, V any](capacity int) *LRUCache[K, V]"
+
+verification_targets:
+  - id: VT-LRU-01
+    category: design
+    name: "无容量限制"
+    severity: high
+    description: "cache 没有大小限制，可能导致 OOM"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "为 cache 添加 LRU 淘汰策略和容量限制"
+
+code_smells:
+  - "cache 无限增长"
+  - "没有淘汰策略"
+
+metadata:
+  files_to_modify: ["cachebox.go"]
+  tags: ["feature", "lru", "cache"]

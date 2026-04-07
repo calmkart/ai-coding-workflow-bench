@@ -1,0 +1,27 @@
+id: "tier1/fix-slice-dedup"
+name: "修复 Dedup 空 slice panic"
+tier: 1
+type: "library"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func Dedup(items []string) []string"
+
+verification_targets:
+  - id: VT-PANIC-01
+    category: correctness
+    name: "空 slice panic"
+    severity: critical
+    description: "Dedup 在空 slice 输入时 panic"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 Dedup 空 slice 和 nil slice 输入时的 panic"
+
+code_smells:
+  - "Dedup 直接访问 items[0] 未检查空 slice"
+
+metadata:
+  files_to_modify: ["strkit.go"]
+  tags: ["bugfix", "nil-safety"]

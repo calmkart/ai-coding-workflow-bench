@@ -1,0 +1,28 @@
+id: "tier3/add-metrics"
+name: "添加 reconcile metrics 收集器"
+tier: 3
+type: "reconciler"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-MET-01
+    category: observability
+    name: "无可观测性"
+    severity: medium
+    description: "无 reconcile 次数/延迟/错误率的 metrics，需要添加收集器"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 MetricsCollector 接口模式收集 reconcile metrics"
+
+code_smells:
+  - "无任何 metrics 收集"
+  - "无法观测 reconcile 性能"
+
+metadata:
+  files_to_modify: ["reconciler.go"]
+  tags: ["feature", "reconciler", "metrics"]

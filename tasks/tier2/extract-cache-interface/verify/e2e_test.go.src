@@ -1,0 +1,49 @@
+package cachebox
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("implements_cache_interface", func(t *testing.T) {
+		// This must compile - proves MapCache implements Cache
+		var c Cache[string, int] = NewMapCache[string, int]()
+		_ = c
+	})
+
+	t.Run("interface_get_set", func(t *testing.T) {
+		var c Cache[string, int] = NewMapCache[string, int]()
+		c.Set("key", 42)
+
+		val, ok := c.Get("key")
+		if !ok || val != 42 {
+			t.Fatalf("expected 42, got %d (ok=%v)", val, ok)
+		}
+	})
+
+	t.Run("interface_delete", func(t *testing.T) {
+		var c Cache[string, string] = NewMapCache[string, string]()
+		c.Set("foo", "bar")
+		c.Delete("foo")
+
+		_, ok := c.Get("foo")
+		if ok {
+			t.Fatal("expected deleted")
+		}
+	})
+
+	t.Run("interface_len", func(t *testing.T) {
+		var c Cache[int, string] = NewMapCache[int, string]()
+		c.Set(1, "a")
+		c.Set(2, "b")
+		c.Set(3, "c")
+
+		if c.Len() != 3 {
+			t.Fatalf("expected 3, got %d", c.Len())
+		}
+	})
+
+	t.Run("new_returns_interface", func(t *testing.T) {
+		c := NewMapCache[string, int]()
+		// Verify it can be assigned to Cache interface
+		var _ Cache[string, int] = c
+	})
+}

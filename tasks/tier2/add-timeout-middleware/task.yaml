@@ -1,0 +1,27 @@
+id: "tier2/add-timeout-middleware"
+name: "添加请求超时中间件"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-TO-01
+    category: resilience
+    name: "无请求超时"
+    severity: high
+    description: "长时间运行的请求没有超时控制"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 timeout 中间件，使用 context 超时控制请求处理时间"
+
+code_smells:
+  - "handler 中 sleep 模拟慢操作没有超时保护"
+
+metadata:
+  files_to_modify: ["main.go", "handlers.go"]
+  tags: ["feature", "middleware", "timeout"]

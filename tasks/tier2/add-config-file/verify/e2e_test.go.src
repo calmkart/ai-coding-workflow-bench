@@ -1,0 +1,92 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func buildCLI(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "taskcli")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build failed: %s\n%s", err, out)
+	}
+	return bin
+}
+
+func runCLI(t *testing.T, bin string, dir string, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		}
+	}
+	return string(out), exitCode
+}
+
+func TestBenchE2E(t *testing.T) {
+	bin := buildCLI(t)
+
+	t.Run("uses_config_data_file", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := map[string]string{"data_file": "custom_tasks.json"}
+		cfgData, _ := json.Marshal(cfg)
+		os.WriteFile(filepath.Join(dir, "config.json"), cfgData, 0644)
+
+		runCLI(t, bin, dir, "add", "config test")
+
+		// Data should be in custom_tasks.json
+		if _, err := os.Stat(filepath.Join(dir, "custom_tasks.json")); err != nil {
+			t.Fatal("expected custom_tasks.json to exist")
+		}
+	})
+
+	t.Run("default_without_config", func(t *testing.T) {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "no config")
+
+		out, _ := runCLI(t, bin, dir, "list")
+		if !strings.Contains(out, "no config") {
+			t.Fatalf("expected task in output: %s", out)
+		}
+	})
+
+	t.Run("custom_config_path", func(t *testing.T) {
+		dir := t.TempDir()
+		cfgPath := filepath.Join(dir, "myconfig.json")
+		cfg := map[string]string{"data_file": "my_tasks.json"}
+		cfgData, _ := json.Marshal(cfg)
+		os.WriteFile(cfgPath, cfgData, 0644)
+
+		runCLI(t, bin, dir, "--config", cfgPath, "add", "custom path")
+
+		if _, err := os.Stat(filepath.Join(dir, "my_tasks.json")); err != nil {
+			t.Fatal("expected my_tasks.json to exist")
+		}
+	})
+
+	t.Run("list_with_config", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := map[string]string{"data_file": "test_tasks.json"}
+		cfgData, _ := json.Marshal(cfg)
+		os.WriteFile(filepath.Join(dir, "config.json"), cfgData, 0644)
+
+		runCLI(t, bin, dir, "add", "configured task")
+		out, _ := runCLI(t, bin, dir, "list")
+		if !strings.Contains(out, "configured task") {
+			t.Fatalf("expected 'configured task' in output: %s", out)
+		}
+	})
+}

@@ -1,0 +1,28 @@
+id: "tier2/extract-middleware-logging"
+name: "提取 logging 中间件"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-MW-01
+    category: middleware
+    name: "重复日志代码"
+    severity: medium
+    description: "每个 handler 中都有重复的 log.Printf 调用，应提取为中间件"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "从 handler 中提取 logging 中间件，减少代码重复"
+
+code_smells:
+  - "每个 handler 开头和结尾都有 log.Printf 调用"
+  - "日志格式不统一"
+
+metadata:
+  files_to_modify: ["handlers.go", "main.go"]
+  tags: ["refactoring", "middleware", "logging"]

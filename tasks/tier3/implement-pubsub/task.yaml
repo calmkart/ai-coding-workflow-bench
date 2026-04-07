@@ -1,0 +1,29 @@
+id: "tier3/implement-pubsub"
+name: "实现内存发布订阅"
+tier: 3
+type: "concurrency"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type PubSub struct"
+  - "func NewPubSub() *PubSub"
+
+verification_targets:
+  - id: VT-PS-01
+    category: feature
+    name: "无 pub/sub"
+    severity: medium
+    description: "需要实现内存发布订阅：Topic 隔离，异步投递，关闭清理"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现内存 PubSub 系统"
+
+code_smells:
+  - "组件间直接调用"
+  - "无消息解耦"
+
+metadata:
+  files_to_modify: ["pubsub.go"]
+  tags: ["feature", "concurrency", "pubsub"]

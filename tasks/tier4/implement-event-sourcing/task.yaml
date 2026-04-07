@@ -1,0 +1,38 @@
+id: "tier4/implement-event-sourcing"
+name: "实现事件溯源模式"
+tier: 4
+type: "http-server"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "func setupRouter() http.Handler"
+  - "type Event struct"
+  - "type EventStore interface"
+  - "func NewInMemoryEventStore() EventStore"
+  - "func (s *TodoAggregate) Apply(event Event)"
+  - "func Replay(events []Event) *TodoAggregate"
+
+verification_targets:
+  - id: VT-ES-01
+    category: architecture
+    name: "直接状态修改无审计"
+    severity: high
+    description: "直接修改 Todo 状态，无法追溯变更历史"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "将直接 CRUD 重构为事件驱动"
+  - "实现 EventStore 存储事件流"
+  - "实现 Apply 从事件重建状态"
+  - "实现 Replay 回放所有事件"
+  - "添加 GET /events 查看事件流"
+
+code_smells:
+  - "直接修改 todo slice 无历史记录"
+  - "无法知道谁在何时做了什么修改"
+  - "无法回放到任意时间点的状态"
+
+metadata:
+  files_to_modify: ["events.go", "aggregate.go", "handlers.go", "main.go"]
+  tags: ["feature", "event-sourcing", "architecture"]

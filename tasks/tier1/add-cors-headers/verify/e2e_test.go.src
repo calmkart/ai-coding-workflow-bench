@@ -1,0 +1,81 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("get_has_cors_headers", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		origin := resp.Header.Get("Access-Control-Allow-Origin")
+		if origin != "*" {
+			t.Fatalf("expected Access-Control-Allow-Origin: *, got %q", origin)
+		}
+	})
+
+	t.Run("options_preflight_returns_204", func(t *testing.T) {
+		req, _ := http.NewRequest("OPTIONS", ts.URL+"/todos", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+			t.Fatalf("OPTIONS: expected 200 or 204, got %d", resp.StatusCode)
+		}
+
+		origin := resp.Header.Get("Access-Control-Allow-Origin")
+		if origin != "*" {
+			t.Fatalf("OPTIONS: expected Access-Control-Allow-Origin: *, got %q", origin)
+		}
+
+		methods := resp.Header.Get("Access-Control-Allow-Methods")
+		if methods == "" {
+			t.Fatal("OPTIONS: missing Access-Control-Allow-Methods header")
+		}
+	})
+
+	t.Run("options_has_allow_headers", func(t *testing.T) {
+		req, _ := http.NewRequest("OPTIONS", ts.URL+"/todos", nil)
+		req.Header.Set("Origin", "http://example.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		headers := resp.Header.Get("Access-Control-Allow-Headers")
+		if headers == "" {
+			t.Fatal("OPTIONS: missing Access-Control-Allow-Headers header")
+		}
+	})
+
+	t.Run("post_has_cors_headers", func(t *testing.T) {
+		req, _ := http.NewRequest("POST", ts.URL+"/todos", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		origin := resp.Header.Get("Access-Control-Allow-Origin")
+		if origin != "*" {
+			t.Fatalf("POST: expected Access-Control-Allow-Origin: *, got %q", origin)
+		}
+	})
+}

@@ -1,0 +1,28 @@
+id: "tier2/extract-logger-interface"
+name: "提取 Logger 接口"
+tier: 2
+type: "library"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "type Logger interface { Info(msg string, args ...any); Error(msg string, args ...any) }"
+
+verification_targets:
+  - id: VT-LOG-01
+    category: design
+    name: "硬编码日志"
+    severity: medium
+    description: "代码到处 fmt.Printf，没有 Logger 抽象"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "提取 Logger 接口，替换所有 fmt.Printf 调用"
+
+code_smells:
+  - "直接调用 fmt.Printf 无法在测试中验证日志"
+  - "无法切换日志后端"
+
+metadata:
+  files_to_modify: ["processor.go"]
+  tags: ["refactoring", "interface", "logging"]

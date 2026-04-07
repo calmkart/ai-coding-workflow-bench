@@ -1,0 +1,85 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("empty_body_returns_400", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("empty body: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("nil_body_returns_400", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("nil body: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("invalid_json_returns_400", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader("not json at all"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid json: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("valid_json_returns_201", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"buy milk","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("valid json: expected 201, got %d", resp.StatusCode)
+		}
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "buy milk" {
+			t.Fatalf("expected title=buy milk, got %v", todo["title"])
+		}
+	})
+
+	t.Run("empty_json_object_returns_201", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("empty json object: expected 201, got %d", resp.StatusCode)
+		}
+	})
+}

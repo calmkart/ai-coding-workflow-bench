@@ -1,0 +1,29 @@
+id: "tier3/add-owner-reference"
+name: "添加 Owner Reference 和级联删除"
+tier: 3
+type: "reconciler"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-OWN-01
+    category: correctness
+    name: "无 owner reference"
+    severity: high
+    description: "子资源没有关联到父资源，需要添加 owner reference + 级联删除"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 OwnerReference 结构，子资源创建时设置 owner"
+  - "父资源删除时级联删除子资源"
+
+code_smells:
+  - "子资源创建后无关联"
+  - "父资源删除后子资源成孤儿"
+
+metadata:
+  files_to_modify: ["reconciler.go", "types.go"]
+  tags: ["feature", "reconciler", "owner-reference"]

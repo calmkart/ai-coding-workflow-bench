@@ -1,0 +1,274 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func refactorReq(t *testing.T, ts *httptest.Server, method, path, body string) *http.Response {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body != "" {
+		req, err = http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req, err = http.NewRequest(method, ts.URL+path, nil)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("health_check", func(t *testing.T) {
+		resp := refactorReq(t, ts, "GET", "/health", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("health: expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("create_todo", func(t *testing.T) {
+		body := `{"title":"refactor test","done":false,"priority":3}`
+		resp := refactorReq(t, ts, "POST", "/todos", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create: expected 201, got %d", resp.StatusCode)
+		}
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "refactor test" {
+			t.Fatalf("wrong title: %v", todo["title"])
+		}
+	})
+
+	t.Run("create_validation_empty_title", func(t *testing.T) {
+		resp := refactorReq(t, ts, "POST", "/todos", `{"title":"","done":false}`)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("empty title: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("create_validation_priority_range", func(t *testing.T) {
+		resp := refactorReq(t, ts, "POST", "/todos", `{"title":"bad","priority":10}`)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("bad priority: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("get_todo", func(t *testing.T) {
+		// Create
+		resp := refactorReq(t, ts, "POST", "/todos", `{"title":"get-me","done":false,"priority":1}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		// Get
+		resp2 := refactorReq(t, ts, "GET", fmt.Sprintf("/todos/%d", id), "")
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("get: expected 200, got %d", resp2.StatusCode)
+		}
+	})
+
+	t.Run("get_todo_not_found", func(t *testing.T) {
+		resp := refactorReq(t, ts, "GET", "/todos/99999", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("not found: expected 404, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("update_todo", func(t *testing.T) {
+		resp := refactorReq(t, ts, "POST", "/todos", `{"title":"update-me","done":false,"priority":1}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		resp2 := refactorReq(t, ts, "PUT", fmt.Sprintf("/todos/%d", id), `{"title":"updated","done":true,"priority":5}`)
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("update: expected 200, got %d", resp2.StatusCode)
+		}
+		var updated map[string]any
+		json.NewDecoder(resp2.Body).Decode(&updated)
+		if updated["title"] != "updated" {
+			t.Fatalf("update: wrong title %v", updated["title"])
+		}
+		if updated["done"] != true {
+			t.Fatal("update: done should be true")
+		}
+	})
+
+	t.Run("delete_todo", func(t *testing.T) {
+		resp := refactorReq(t, ts, "POST", "/todos", `{"title":"delete-me","done":false,"priority":0}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		resp2 := refactorReq(t, ts, "DELETE", fmt.Sprintf("/todos/%d", id), "")
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete: expected 204, got %d", resp2.StatusCode)
+		}
+
+		resp3 := refactorReq(t, ts, "GET", fmt.Sprintf("/todos/%d", id), "")
+		defer resp3.Body.Close()
+		if resp3.StatusCode != http.StatusNotFound {
+			t.Fatalf("after delete: expected 404, got %d", resp3.StatusCode)
+		}
+	})
+
+	t.Run("list_with_pagination", func(t *testing.T) {
+		// Create several todos
+		for i := 0; i < 5; i++ {
+			refactorReq(t, ts, "POST", "/todos", fmt.Sprintf(`{"title":"page-%d","done":false,"priority":0}`, i))
+		}
+
+		resp := refactorReq(t, ts, "GET", "/todos?page=1&page_size=3", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("paginated list: expected 200, got %d", resp.StatusCode)
+		}
+		var list []map[string]any
+		json.NewDecoder(resp.Body).Decode(&list)
+		if len(list) > 3 {
+			t.Fatalf("page_size=3 should return at most 3 items, got %d", len(list))
+		}
+		totalCount := resp.Header.Get("X-Total-Count")
+		if totalCount == "" {
+			t.Fatal("missing X-Total-Count header")
+		}
+	})
+
+	t.Run("search_todos", func(t *testing.T) {
+		refactorReq(t, ts, "POST", "/todos", `{"title":"searchable item","done":false,"priority":0}`)
+
+		resp := refactorReq(t, ts, "GET", "/search?q=searchable", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("search: expected 200, got %d", resp.StatusCode)
+		}
+		var results []map[string]any
+		json.NewDecoder(resp.Body).Decode(&results)
+		if len(results) == 0 {
+			t.Fatal("search should find 'searchable item'")
+		}
+	})
+
+	t.Run("stats_endpoint", func(t *testing.T) {
+		resp := refactorReq(t, ts, "GET", "/stats", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("stats: expected 200, got %d", resp.StatusCode)
+		}
+		var stats map[string]any
+		json.NewDecoder(resp.Body).Decode(&stats)
+		if stats["total"] == nil {
+			t.Fatal("stats missing 'total' field")
+		}
+		if stats["done"] == nil {
+			t.Fatal("stats missing 'done' field")
+		}
+	})
+
+	t.Run("tags_crud", func(t *testing.T) {
+		// Create todo
+		resp := refactorReq(t, ts, "POST", "/todos", `{"title":"tag-test","done":false,"priority":0}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		// Add tag
+		resp2 := refactorReq(t, ts, "POST", fmt.Sprintf("/todos/%d/tags", id), `{"name":"important"}`)
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusCreated {
+			t.Fatalf("add tag: expected 201, got %d", resp2.StatusCode)
+		}
+
+		// Get tags
+		resp3 := refactorReq(t, ts, "GET", fmt.Sprintf("/todos/%d/tags", id), "")
+		defer resp3.Body.Close()
+		var tagList []map[string]any
+		json.NewDecoder(resp3.Body).Decode(&tagList)
+		if len(tagList) != 1 {
+			t.Fatalf("expected 1 tag, got %d", len(tagList))
+		}
+	})
+
+	t.Run("error_format_is_json", func(t *testing.T) {
+		resp := refactorReq(t, ts, "GET", "/todos/99999", "")
+		defer resp.Body.Close()
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/json") {
+			t.Fatalf("error response should be JSON, got Content-Type: %s", ct)
+		}
+		var errResp map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("error response should be valid JSON: %v", err)
+		}
+		if errResp["error"] == nil && errResp["code"] == nil {
+			t.Fatal("error response should have 'error' or 'code' field")
+		}
+	})
+
+	t.Run("request_id_header", func(t *testing.T) {
+		resp := refactorReq(t, ts, "GET", "/health", "")
+		defer resp.Body.Close()
+		reqID := resp.Header.Get("X-Request-ID")
+		if reqID == "" {
+			t.Fatal("response should have X-Request-ID header")
+		}
+	})
+
+	t.Run("recovery_from_panic", func(t *testing.T) {
+		// This just verifies the server doesn't crash on bad input
+		resp := refactorReq(t, ts, "GET", "/todos/abc", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("bad id: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("delete_todo_cascades_tags", func(t *testing.T) {
+		// Create todo with tag
+		resp := refactorReq(t, ts, "POST", "/todos", `{"title":"cascade","done":false,"priority":0}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		refactorReq(t, ts, "POST", fmt.Sprintf("/todos/%d/tags", id), `{"name":"cascade-tag"}`)
+
+		// Delete todo
+		refactorReq(t, ts, "DELETE", fmt.Sprintf("/todos/%d", id), "")
+
+		// Tags should be gone
+		resp4 := refactorReq(t, ts, "GET", fmt.Sprintf("/todos/%d/tags", id), "")
+		defer resp4.Body.Close()
+		// Should be 404 since todo is deleted
+		if resp4.StatusCode != http.StatusNotFound {
+			t.Fatalf("tags after todo delete: expected 404, got %d", resp4.StatusCode)
+		}
+	})
+}

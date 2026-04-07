@@ -1,0 +1,146 @@
+package pipeline
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("single_stage", func(t *testing.T) {
+		p := NewPipeline(func(x int) (int, error) {
+			return x * 2, nil
+		})
+
+		result, err := p.Execute(5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != 10 {
+			t.Fatalf("expected 10, got %d", result)
+		}
+	})
+
+	t.Run("chained_stages", func(t *testing.T) {
+		toStr := NewPipeline(func(x int) (string, error) {
+			return fmt.Sprintf("%d", x), nil
+		})
+		addBang := NewPipeline(func(s string) (string, error) {
+			return s + "!", nil
+		})
+
+		combined := Then(toStr, addBang)
+		result, err := combined.Execute(42)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "42!" {
+			t.Fatalf("expected '42!', got '%s'", result)
+		}
+	})
+
+	t.Run("three_stages", func(t *testing.T) {
+		double := NewPipeline(func(x int) (int, error) { return x * 2, nil })
+		toStr := NewPipeline(func(x int) (string, error) { return fmt.Sprintf("%d", x), nil })
+		upper := NewPipeline(func(s string) (string, error) { return strings.ToUpper(s), nil })
+
+		p := Then(Then(double, toStr), upper)
+		result, err := p.Execute(5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "10" {
+			t.Fatalf("expected '10', got '%s'", result)
+		}
+	})
+
+	t.Run("error_propagation", func(t *testing.T) {
+		errBad := errors.New("bad input")
+		failing := NewPipeline(func(x int) (int, error) {
+			if x < 0 {
+				return 0, errBad
+			}
+			return x, nil
+		})
+		double := NewPipeline(func(x int) (int, error) { return x * 2, nil })
+
+		p := Then(failing, double)
+		_, err := p.Execute(-1)
+		if !errors.Is(err, errBad) {
+			t.Fatalf("expected errBad, got %v", err)
+		}
+	})
+
+	t.Run("error_stops_pipeline", func(t *testing.T) {
+		callCount := 0
+		first := NewPipeline(func(x int) (int, error) {
+			return 0, errors.New("fail")
+		})
+		second := NewPipeline(func(x int) (int, error) {
+			callCount++
+			return x, nil
+		})
+
+		p := Then(first, second)
+		p.Execute(1)
+
+		if callCount != 0 {
+			t.Fatal("second stage should not be called after first fails")
+		}
+	})
+
+	t.Run("parallel_execution", func(t *testing.T) {
+		double := NewPipeline(func(x int) (int, error) { return x * 2, nil })
+		triple := NewPipeline(func(x int) (int, error) { return x * 3, nil })
+
+		results, err := Parallel(10, double, triple)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+		if results[0] != 20 {
+			t.Fatalf("expected 20, got %d", results[0])
+		}
+		if results[1] != 30 {
+			t.Fatalf("expected 30, got %d", results[1])
+		}
+	})
+
+	t.Run("with_retry", func(t *testing.T) {
+		attempts := 0
+		flaky := NewPipeline(func(x int) (int, error) {
+			attempts++
+			if attempts < 3 {
+				return 0, errors.New("transient")
+			}
+			return x * 2, nil
+		})
+
+		retrying := WithRetry(flaky, 5)
+		result, err := retrying.Execute(5)
+		if err != nil {
+			t.Fatalf("expected success after retries, got %v", err)
+		}
+		if result != 10 {
+			t.Fatalf("expected 10, got %d", result)
+		}
+		if attempts != 3 {
+			t.Fatalf("expected 3 attempts, got %d", attempts)
+		}
+	})
+
+	t.Run("with_retry_exhausted", func(t *testing.T) {
+		failing := NewPipeline(func(x int) (int, error) {
+			return 0, errors.New("always fails")
+		})
+
+		retrying := WithRetry(failing, 3)
+		_, err := retrying.Execute(1)
+		if err == nil {
+			t.Fatal("expected error after exhausting retries")
+		}
+	})
+}

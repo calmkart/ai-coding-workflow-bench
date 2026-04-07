@@ -1,0 +1,85 @@
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func seedTodos(t *testing.T, baseURL string, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		body := fmt.Sprintf(`{"title":"todo-%d","done":false}`, i+1)
+		resp, err := http.Post(baseURL+"/todos", "application/json",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	seedTodos(t, ts.URL, 25)
+
+	t.Run("has_total_count_header", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page=1&page_size=10")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		tc := resp.Header.Get("X-Total-Count")
+		if tc == "" {
+			t.Fatal("missing X-Total-Count header")
+		}
+		if tc != "25" {
+			t.Fatalf("X-Total-Count: expected 25, got %s", tc)
+		}
+	})
+
+	t.Run("has_page_header", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page=2&page_size=10")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		page := resp.Header.Get("X-Page")
+		if page != "2" {
+			t.Fatalf("X-Page: expected 2, got %s", page)
+		}
+	})
+
+	t.Run("has_page_size_header", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page=1&page_size=5")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		ps := resp.Header.Get("X-Page-Size")
+		if ps != "5" {
+			t.Fatalf("X-Page-Size: expected 5, got %s", ps)
+		}
+	})
+
+	t.Run("total_count_with_default_params", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		tc := resp.Header.Get("X-Total-Count")
+		if tc != "25" {
+			t.Fatalf("X-Total-Count default: expected 25, got %s", tc)
+		}
+	})
+}

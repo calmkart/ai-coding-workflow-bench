@@ -1,0 +1,30 @@
+id: "tier3/refactor-to-service"
+name: "重构为 Handler/Service/Repository 三层架构"
+tier: 3
+type: "http-server"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-LAYER-01
+    category: design
+    name: "巨型 handler"
+    severity: high
+    description: "Handler 包含验证、业务逻辑、数据访问和序列化，需要分层"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "将巨型 handler 拆分为 Handler（HTTP 处理）、Service（业务逻辑）、Repository（数据访问）三层"
+  - "每层通过接口依赖，可独立测试"
+
+code_smells:
+  - "单个 handler 函数包含验证、业务逻辑、数据访问、JSON 序列化"
+  - "无法对业务逻辑单独测试"
+  - "数据访问直接嵌入 handler"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["refactoring", "architecture", "layered"]

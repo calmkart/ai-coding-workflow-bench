@@ -1,0 +1,239 @@
+package scheduler
+
+import (
+	"context"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("parse_every_second", func(t *testing.T) {
+		cron, err := ParseCron("* * *")
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if len(cron.Seconds) != 60 {
+			t.Fatalf("expected 60 seconds, got %d", len(cron.Seconds))
+		}
+	})
+
+	t.Run("parse_specific_second", func(t *testing.T) {
+		cron, err := ParseCron("30 * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cron.Seconds) != 1 || cron.Seconds[0] != 30 {
+			t.Fatalf("expected [30], got %v", cron.Seconds)
+		}
+	})
+
+	t.Run("parse_interval", func(t *testing.T) {
+		cron, err := ParseCron("*/15 * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// */15 seconds = 0, 15, 30, 45
+		if len(cron.Seconds) != 4 {
+			t.Fatalf("expected 4 seconds, got %d: %v", len(cron.Seconds), cron.Seconds)
+		}
+	})
+
+	t.Run("parse_comma_separated", func(t *testing.T) {
+		cron, err := ParseCron("0,15,30,45 * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cron.Seconds) != 4 {
+			t.Fatalf("expected 4 seconds, got %d", len(cron.Seconds))
+		}
+	})
+
+	t.Run("parse_full_expression", func(t *testing.T) {
+		cron, err := ParseCron("0 */5 9,17")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cron.Seconds) != 1 || cron.Seconds[0] != 0 {
+			t.Fatalf("seconds: %v", cron.Seconds)
+		}
+		if len(cron.Minutes) != 12 { // 0,5,10,15,20,25,30,35,40,45,50,55
+			t.Fatalf("minutes: expected 12, got %d: %v", len(cron.Minutes), cron.Minutes)
+		}
+		if len(cron.Hours) != 2 {
+			t.Fatalf("hours: expected 2, got %d: %v", len(cron.Hours), cron.Hours)
+		}
+	})
+
+	t.Run("parse_invalid_expression", func(t *testing.T) {
+		_, err := ParseCron("invalid")
+		if err == nil {
+			t.Fatal("should error on invalid expression")
+		}
+	})
+
+	t.Run("parse_invalid_too_few_fields", func(t *testing.T) {
+		_, err := ParseCron("* *")
+		if err == nil {
+			t.Fatal("should error on too few fields")
+		}
+	})
+
+	t.Run("parse_out_of_range", func(t *testing.T) {
+		_, err := ParseCron("70 * *")
+		if err == nil {
+			t.Fatal("should error on second > 59")
+		}
+	})
+
+	t.Run("matches_time", func(t *testing.T) {
+		cron, _ := ParseCron("30 15 10")
+		t1 := time.Date(2024, 1, 1, 10, 15, 30, 0, time.UTC)
+		if !cron.Matches(t1) {
+			t.Fatal("should match 10:15:30")
+		}
+		t2 := time.Date(2024, 1, 1, 10, 15, 31, 0, time.UTC)
+		if cron.Matches(t2) {
+			t.Fatal("should not match 10:15:31")
+		}
+	})
+
+	t.Run("next_time", func(t *testing.T) {
+		cron, _ := ParseCron("0 * *")
+		from := time.Date(2024, 1, 1, 10, 15, 30, 0, time.UTC)
+		next := cron.Next(from)
+		expected := time.Date(2024, 1, 1, 10, 16, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Fatalf("expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("next_wraps_hour", func(t *testing.T) {
+		cron, _ := ParseCron("0 0 *")
+		from := time.Date(2024, 1, 1, 10, 30, 0, 0, time.UTC)
+		next := cron.Next(from)
+		expected := time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC)
+		if !next.Equal(expected) {
+			t.Fatalf("expected %v, got %v", expected, next)
+		}
+	})
+
+	t.Run("schedule_and_execute", func(t *testing.T) {
+		s := NewScheduler()
+
+		var count atomic.Int32
+		_, err := s.Schedule("test", "* * *", func() {
+			count.Add(1)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		go s.Start(ctx)
+
+		// Wait for at least 2 executions
+		time.Sleep(2500 * time.Millisecond)
+		cancel()
+
+		c := count.Load()
+		if c < 2 {
+			t.Fatalf("expected at least 2 executions, got %d", c)
+		}
+	})
+
+	t.Run("cancel_job", func(t *testing.T) {
+		s := NewScheduler()
+
+		var count atomic.Int32
+		id, err := s.Schedule("cancel-me", "* * *", func() {
+			count.Add(1)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		go s.Start(ctx)
+		time.Sleep(1500 * time.Millisecond)
+
+		// Cancel the job
+		err = s.Cancel(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		countAtCancel := count.Load()
+		time.Sleep(2 * time.Second)
+		countAfter := count.Load()
+
+		// After cancel, count should not increase (or increase by at most 1 due to timing)
+		if countAfter > countAtCancel+1 {
+			t.Fatalf("job should be cancelled: count at cancel=%d, after=%d", countAtCancel, countAfter)
+		}
+	})
+
+	t.Run("cancel_nonexistent", func(t *testing.T) {
+		s := NewScheduler()
+		err := s.Cancel("nonexistent")
+		if err == nil {
+			t.Fatal("cancel nonexistent should error")
+		}
+	})
+
+	t.Run("list_jobs", func(t *testing.T) {
+		s := NewScheduler()
+		s.Schedule("job1", "* * *", func() {})
+		s.Schedule("job2", "*/5 * *", func() {})
+
+		jobs := s.ListJobs()
+		if len(jobs) != 2 {
+			t.Fatalf("expected 2 jobs, got %d", len(jobs))
+		}
+	})
+
+	t.Run("context_cancellation_stops_scheduler", func(t *testing.T) {
+		s := NewScheduler()
+		s.Schedule("ctx-test", "* * *", func() {})
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan struct{})
+		go func() {
+			s.Start(ctx)
+			close(done)
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+
+		select {
+		case <-done:
+			// OK, scheduler stopped
+		case <-time.After(2 * time.Second):
+			t.Fatal("scheduler should stop when context is cancelled")
+		}
+	})
+
+	t.Run("multiple_jobs_execute", func(t *testing.T) {
+		s := NewScheduler()
+		var c1, c2 atomic.Int32
+
+		s.Schedule("job1", "* * *", func() { c1.Add(1) })
+		s.Schedule("job2", "* * *", func() { c2.Add(1) })
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+		defer cancel()
+
+		go s.Start(ctx)
+		time.Sleep(2200 * time.Millisecond)
+
+		if c1.Load() < 1 || c2.Load() < 1 {
+			t.Fatalf("both jobs should execute: c1=%d, c2=%d", c1.Load(), c2.Load())
+		}
+	})
+}

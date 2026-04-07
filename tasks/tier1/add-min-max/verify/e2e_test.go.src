@@ -1,0 +1,71 @@
+package strkit
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("min_int", func(t *testing.T) {
+		if Min(3, 5) != 3 {
+			t.Fatal("Min(3, 5) should be 3")
+		}
+		if Min(5, 3) != 3 {
+			t.Fatal("Min(5, 3) should be 3")
+		}
+	})
+
+	t.Run("max_int", func(t *testing.T) {
+		if Max(3, 5) != 5 {
+			t.Fatal("Max(3, 5) should be 5")
+		}
+		if Max(5, 3) != 5 {
+			t.Fatal("Max(5, 3) should be 5")
+		}
+	})
+
+	t.Run("min_float64", func(t *testing.T) {
+		if Min(1.5, 2.5) != 1.5 {
+			t.Fatal("Min(1.5, 2.5) should be 1.5")
+		}
+	})
+
+	t.Run("max_float64", func(t *testing.T) {
+		if Max(1.5, 2.5) != 2.5 {
+			t.Fatal("Max(1.5, 2.5) should be 2.5")
+		}
+	})
+
+	t.Run("min_string", func(t *testing.T) {
+		if Min("apple", "banana") != "apple" {
+			t.Fatal("Min(apple, banana) should be apple")
+		}
+	})
+
+	t.Run("max_string", func(t *testing.T) {
+		if Max("apple", "banana") != "banana" {
+			t.Fatal("Max(apple, banana) should be banana")
+		}
+	})
+
+	t.Run("min_equal", func(t *testing.T) {
+		if Min(7, 7) != 7 {
+			t.Fatal("Min(7, 7) should be 7")
+		}
+	})
+
+	t.Run("max_equal", func(t *testing.T) {
+		if Max(7, 7) != 7 {
+			t.Fatal("Max(7, 7) should be 7")
+		}
+	})
+
+	t.Run("min_negative", func(t *testing.T) {
+		if Min(-3, -5) != -5 {
+			t.Fatal("Min(-3, -5) should be -5")
+		}
+	})
+
+	t.Run("max_negative", func(t *testing.T) {
+		if Max(-3, -5) != -3 {
+			t.Fatal("Max(-3, -5) should be -3")
+		}
+	})
+}

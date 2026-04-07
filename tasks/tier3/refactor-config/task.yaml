@@ -1,0 +1,31 @@
+id: "tier3/refactor-config"
+name: "提取配置为 Config struct"
+tier: 3
+type: "http-server"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-CFG-01
+    category: design
+    name: "硬编码配置"
+    severity: medium
+    description: "端口、超时等硬编码，需要提取为 Config struct + 环境变量加载"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "定义 Config struct 集中管理配置"
+  - "支持环境变量和默认值"
+
+code_smells:
+  - "端口硬编码 8080"
+  - "页大小硬编码 10"
+  - "title 长度限制硬编码 200"
+  - "配置分散在代码各处"
+
+metadata:
+  files_to_modify: ["main.go", "handlers.go"]
+  tags: ["refactoring", "config"]

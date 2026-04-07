@@ -1,0 +1,28 @@
+id: "tier2/extract-cache-interface"
+name: "提取 Cache 接口"
+tier: 2
+type: "library"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "type Cache[K comparable, V any] interface { Get(K) (V, bool); Set(K, V); Delete(K); Len() int }"
+
+verification_targets:
+  - id: VT-IF-01
+    category: design
+    name: "具体类型耦合"
+    severity: medium
+    description: "cache 使用具体类型，没有接口抽象"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "从 MapCache 具体实现提取 Cache[K,V] 泛型接口"
+
+code_smells:
+  - "直接使用具体 struct 类型，无法替换实现"
+  - "测试耦合具体类型"
+
+metadata:
+  files_to_modify: ["cachebox.go"]
+  tags: ["refactoring", "interface", "generics"]

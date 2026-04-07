@@ -1,0 +1,84 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("empty_title_returns_400", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("empty title: expected 400, got %d", resp.StatusCode)
+		}
+		var errResp map[string]any
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if errResp["error"] == nil {
+			t.Fatal("expected error field in response")
+		}
+	})
+
+	t.Run("whitespace_title_returns_400", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"   ","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("whitespace title: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("long_title_returns_400", func(t *testing.T) {
+		longTitle := strings.Repeat("a", 201)
+		body := `{"title":"` + longTitle + `","done":false}`
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("long title: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("valid_title_returns_201", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"valid todo","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("valid title: expected 201, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("max_length_title_accepted", func(t *testing.T) {
+		title200 := strings.Repeat("b", 200)
+		body := `{"title":"` + title200 + `","done":false}`
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("200-char title: expected 201, got %d", resp.StatusCode)
+		}
+	})
+}

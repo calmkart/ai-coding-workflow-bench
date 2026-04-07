@@ -1,0 +1,27 @@
+id: "tier1/fix-flag-default"
+name: "修复 --port flag 默认值"
+tier: 1
+type: "cli"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func run(args []string) (*Config, error)"
+
+verification_targets:
+  - id: VT-CONFIG-01
+    category: configuration
+    name: "错误的默认端口"
+    severity: high
+    description: "--port flag 默认值为 0，应该是 8080"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 --port flag 的默认值从 0 到 8080"
+
+code_smells:
+  - "--port flag 默认值为 0，导致启动时绑定到随机端口"
+
+metadata:
+  files_to_modify: ["main.go"]
+  tags: ["bugfix", "configuration"]

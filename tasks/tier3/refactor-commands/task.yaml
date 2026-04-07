@@ -1,0 +1,29 @@
+id: "tier3/refactor-commands"
+name: "重构为 Command 接口模式"
+tier: 3
+type: "cli"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "type Command interface { Name() string; Description() string; Run(args []string) error }"
+
+verification_targets:
+  - id: VT-CMD-01
+    category: design
+    name: "巨型 switch-case"
+    severity: medium
+    description: "所有命令在 main 的 switch-case 中，需要重构为 Command 接口"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "将 switch-case 分发重构为 Command 接口 + Registry 模式"
+
+code_smells:
+  - "main 函数中巨型 switch-case"
+  - "每次添加命令都要修改 main"
+  - "命令逻辑和分发逻辑耦合"
+
+metadata:
+  files_to_modify: ["main.go", "commands.go"]
+  tags: ["refactoring", "pattern", "command"]

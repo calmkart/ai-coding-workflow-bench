@@ -1,0 +1,126 @@
+package statemgr
+
+import (
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("owner_reference_struct", func(t *testing.T) {
+		ref := OwnerReference{Name: "parent", Kind: "App"}
+		if ref.Name != "parent" {
+			t.Fatalf("expected 'parent', got '%s'", ref.Name)
+		}
+	})
+
+	t.Run("set_owner", func(t *testing.T) {
+		parent := &Resource{Name: "parent", Kind: "App"}
+		child := &Resource{Name: "child", Kind: "Child"}
+
+		SetOwner(child, parent)
+
+		if child.OwnerRef == nil {
+			t.Fatal("expected owner ref to be set")
+		}
+		if child.OwnerRef.Name != "parent" {
+			t.Fatalf("expected owner 'parent', got '%s'", child.OwnerRef.Name)
+		}
+	})
+
+	t.Run("is_owned_by", func(t *testing.T) {
+		parent := &Resource{Name: "parent", Kind: "App"}
+		child := &Resource{Name: "child", Kind: "Child"}
+		SetOwner(child, parent)
+
+		if !IsOwnedBy(child, parent) {
+			t.Fatal("expected child to be owned by parent")
+		}
+
+		other := &Resource{Name: "other", Kind: "App"}
+		if IsOwnedBy(child, other) {
+			t.Fatal("child should not be owned by other")
+		}
+	})
+
+	t.Run("get_owned", func(t *testing.T) {
+		store := NewStore()
+		parent := &Resource{Name: "parent", Kind: "App"}
+		store.Put(parent)
+
+		child1 := &Resource{Name: "child1", Kind: "Child"}
+		SetOwner(child1, parent)
+		store.Put(child1)
+
+		child2 := &Resource{Name: "child2", Kind: "Child"}
+		SetOwner(child2, parent)
+		store.Put(child2)
+
+		orphan := &Resource{Name: "orphan", Kind: "Child"}
+		store.Put(orphan)
+
+		owned := GetOwned(store, parent)
+		if len(owned) != 2 {
+			t.Fatalf("expected 2 owned, got %d", len(owned))
+		}
+	})
+
+	t.Run("delete_with_cascade", func(t *testing.T) {
+		store := NewStore()
+		parent := &Resource{Name: "parent", Kind: "App"}
+		store.Put(parent)
+
+		child1 := &Resource{Name: "child1", Kind: "Child"}
+		SetOwner(child1, parent)
+		store.Put(child1)
+
+		child2 := &Resource{Name: "child2", Kind: "Child"}
+		SetOwner(child2, parent)
+		store.Put(child2)
+
+		DeleteWithCascade(store, "parent")
+
+		_, ok := store.Get("parent")
+		if ok {
+			t.Fatal("parent should be deleted")
+		}
+		_, ok = store.Get("child1")
+		if ok {
+			t.Fatal("child1 should be cascade deleted")
+		}
+		_, ok = store.Get("child2")
+		if ok {
+			t.Fatal("child2 should be cascade deleted")
+		}
+	})
+
+	t.Run("reconciler_sets_owner", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "app1",
+			Kind: "App",
+			Spec: ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewAppReconciler(store)
+		rec.Reconcile("app1")
+
+		// Check child has owner ref
+		child, ok := store.Get("app1-child-1")
+		if !ok {
+			t.Fatal("expected child to exist")
+		}
+		if child.OwnerRef == nil {
+			t.Fatal("expected child to have owner reference")
+		}
+		if child.OwnerRef.Name != "app1" {
+			t.Fatalf("expected owner 'app1', got '%s'", child.OwnerRef.Name)
+		}
+	})
+
+	t.Run("no_owner_ref_on_orphan", func(t *testing.T) {
+		r := &Resource{Name: "test"}
+		if r.OwnerRef != nil {
+			t.Fatal("new resource should have nil owner ref")
+		}
+	})
+}

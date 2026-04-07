@@ -1,0 +1,37 @@
+id: "tier4/implement-saga"
+name: "实现 Saga 模式处理分布式事务"
+tier: 4
+type: "http-server"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "func setupRouter() http.Handler"
+  - "type SagaStep interface"
+  - "type Saga struct"
+  - "func NewSaga(name string) *Saga"
+  - "func (s *Saga) AddStep(step SagaStep)"
+  - "func (s *Saga) Execute(ctx context.Context) (*SagaResult, error)"
+
+verification_targets:
+  - id: VT-SAGA-01
+    category: reliability
+    name: "多步操作无补偿"
+    severity: critical
+    description: "多步创建操作失败后无回滚，导致数据不一致"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 SagaStep 接口（Forward/Compensate）"
+  - "实现 Saga 顺序执行器"
+  - "实现失败时反向补偿回滚"
+  - "添加 POST /projects 使用 Saga 创建项目+关联 todo"
+
+code_smells:
+  - "创建项目的多步操作没有事务保证"
+  - "中间步骤失败后之前的步骤不会回滚"
+  - "没有补偿逻辑"
+
+metadata:
+  files_to_modify: ["saga.go", "handlers.go", "main.go"]
+  tags: ["feature", "saga", "distributed-transaction"]

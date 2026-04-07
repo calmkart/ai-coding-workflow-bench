@@ -1,0 +1,178 @@
+package exprparser
+
+import (
+	"errors"
+	"math"
+	"testing"
+)
+
+func assertCalc(t *testing.T, input string, expected float64) {
+	t.Helper()
+	result, err := Calc(input)
+	if err != nil {
+		t.Fatalf("Calc(%q) error: %v", input, err)
+	}
+	if math.Abs(result-expected) > 1e-9 {
+		t.Fatalf("Calc(%q) = %v, expected %v", input, result, expected)
+	}
+}
+
+func assertCalcError(t *testing.T, input string) {
+	t.Helper()
+	_, err := Calc(input)
+	if err == nil {
+		t.Fatalf("Calc(%q) should error", input)
+	}
+}
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("basic_addition", func(t *testing.T) {
+		assertCalc(t, "1+2", 3)
+	})
+
+	t.Run("basic_subtraction", func(t *testing.T) {
+		assertCalc(t, "5-3", 2)
+	})
+
+	t.Run("basic_multiplication", func(t *testing.T) {
+		assertCalc(t, "3*4", 12)
+	})
+
+	t.Run("basic_division", func(t *testing.T) {
+		assertCalc(t, "10/4", 2.5)
+	})
+
+	t.Run("operator_precedence_mul_before_add", func(t *testing.T) {
+		assertCalc(t, "2+3*4", 14) // not 20
+	})
+
+	t.Run("operator_precedence_div_before_sub", func(t *testing.T) {
+		assertCalc(t, "10-6/3", 8) // not 1.333
+	})
+
+	t.Run("parentheses_override_precedence", func(t *testing.T) {
+		assertCalc(t, "(2+3)*4", 20)
+	})
+
+	t.Run("nested_parentheses", func(t *testing.T) {
+		assertCalc(t, "((1+2)*(3+4))", 21)
+	})
+
+	t.Run("unary_minus", func(t *testing.T) {
+		assertCalc(t, "-5", -5)
+	})
+
+	t.Run("unary_minus_in_expression", func(t *testing.T) {
+		assertCalc(t, "3+-2", 1)
+	})
+
+	t.Run("unary_minus_with_parentheses", func(t *testing.T) {
+		assertCalc(t, "-(3+4)", -7)
+	})
+
+	t.Run("double_unary_minus", func(t *testing.T) {
+		assertCalc(t, "--5", 5)
+	})
+
+	t.Run("floating_point", func(t *testing.T) {
+		assertCalc(t, "3.14*2", 6.28)
+	})
+
+	t.Run("floating_point_division", func(t *testing.T) {
+		assertCalc(t, "1/3", 1.0/3.0)
+	})
+
+	t.Run("complex_expression", func(t *testing.T) {
+		assertCalc(t, "2*(3+4)-5/2.5+1", 13)
+		// 2*7 - 2 + 1 = 14 - 2 + 1 = 13
+	})
+
+	t.Run("whitespace_handling", func(t *testing.T) {
+		assertCalc(t, "  1  +  2  ", 3)
+	})
+
+	t.Run("no_whitespace", func(t *testing.T) {
+		assertCalc(t, "1+2*3-4/2", 5)
+	})
+
+	t.Run("single_number", func(t *testing.T) {
+		assertCalc(t, "42", 42)
+	})
+
+	t.Run("division_by_zero", func(t *testing.T) {
+		_, err := Calc("1/0")
+		if err == nil {
+			t.Fatal("division by zero should error")
+		}
+		if !errors.Is(err, ErrDivisionByZero) {
+			t.Fatalf("expected ErrDivisionByZero, got %v", err)
+		}
+	})
+
+	t.Run("invalid_input_empty", func(t *testing.T) {
+		assertCalcError(t, "")
+	})
+
+	t.Run("invalid_input_operator_only", func(t *testing.T) {
+		assertCalcError(t, "+")
+	})
+
+	t.Run("invalid_input_unmatched_paren", func(t *testing.T) {
+		assertCalcError(t, "(1+2")
+	})
+
+	t.Run("invalid_input_double_operator", func(t *testing.T) {
+		assertCalcError(t, "1++2")
+		// Note: 1+-2 is valid (unary minus), but 1++2 is not
+	})
+
+	t.Run("invalid_input_letters", func(t *testing.T) {
+		assertCalcError(t, "abc")
+	})
+
+	t.Run("tokenize_returns_tokens", func(t *testing.T) {
+		tokens, err := Tokenize("1+2*3")
+		if err != nil {
+			t.Fatalf("tokenize error: %v", err)
+		}
+		// Should have: 1, +, 2, *, 3, EOF
+		if len(tokens) < 5 {
+			t.Fatalf("expected at least 5 tokens, got %d", len(tokens))
+		}
+		if tokens[0].Type != TokenNumber {
+			t.Fatal("first token should be number")
+		}
+		if tokens[1].Type != TokenPlus {
+			t.Fatal("second token should be plus")
+		}
+	})
+
+	t.Run("parse_returns_ast", func(t *testing.T) {
+		tokens, _ := Tokenize("1+2")
+		expr, err := Parse(tokens)
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if expr == nil {
+			t.Fatal("expr should not be nil")
+		}
+		// Should be BinaryExpr
+		bin, ok := expr.(*BinaryExpr)
+		if !ok {
+			t.Fatalf("expected BinaryExpr, got %T", expr)
+		}
+		if bin.Op != TokenPlus {
+			t.Fatalf("expected Plus op, got %v", bin.Op)
+		}
+	})
+
+	t.Run("large_expression", func(t *testing.T) {
+		// 1+2+3+...+10 = 55
+		assertCalc(t, "1+2+3+4+5+6+7+8+9+10", 55)
+	})
+
+	t.Run("mixed_operations", func(t *testing.T) {
+		assertCalc(t, "10/2+3*4-5", 12)
+		// 5 + 12 - 5 = 12
+	})
+}

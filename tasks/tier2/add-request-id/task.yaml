@@ -1,0 +1,27 @@
+id: "tier2/add-request-id"
+name: "添加请求 ID 中间件"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-RID-01
+    category: middleware
+    name: "缺少请求追踪"
+    severity: medium
+    description: "响应缺少 X-Request-ID 头，无法追踪请求"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加中间件为每个请求生成唯一 X-Request-ID"
+
+code_smells:
+  - "无法追踪单个请求的处理过程"
+
+metadata:
+  files_to_modify: ["main.go", "handlers.go"]
+  tags: ["feature", "middleware", "observability"]

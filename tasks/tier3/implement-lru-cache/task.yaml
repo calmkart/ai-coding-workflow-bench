@@ -1,0 +1,30 @@
+id: "tier3/implement-lru-cache"
+name: "实现完整 LRU Cache"
+tier: 3
+type: "library"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type LRUCache[K comparable, V any] struct"
+  - "func NewLRUCache[K comparable, V any](capacity int, ttl time.Duration) *LRUCache[K, V]"
+
+verification_targets:
+  - id: VT-LRU-01
+    category: feature
+    name: "不完整缓存"
+    severity: high
+    description: "需要实现完整的 LRU 缓存：Get/Set/Delete/Len + TTL + 并发安全"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现完整的 LRU cache 包括淘汰策略、TTL 过期和并发安全"
+
+code_smells:
+  - "SimpleCache 没有容量限制"
+  - "没有 LRU 淘汰策略"
+  - "没有 TTL 过期"
+
+metadata:
+  files_to_modify: ["cache.go"]
+  tags: ["feature", "data-structure", "lru"]

@@ -1,0 +1,64 @@
+package main
+
+import (
+	"bytes"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("success_returns_0", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runApp([]string{"list"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("list command: expected exit code 0, got %d", code)
+		}
+	})
+
+	t.Run("unknown_command_returns_1", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runApp([]string{"foobar"}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("unknown command: expected exit code 1, got %d", code)
+		}
+	})
+
+	t.Run("no_args_returns_1", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runApp([]string{}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("no args: expected exit code 1, got %d", code)
+		}
+	})
+
+	t.Run("add_without_title_returns_1", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runApp([]string{"add"}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("add without title: expected exit code 1, got %d", code)
+		}
+	})
+
+	t.Run("error_written_to_stderr", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		runApp([]string{"foobar"}, &stdout, &stderr)
+		if stderr.Len() == 0 {
+			t.Fatal("expected error output on stderr")
+		}
+	})
+
+	t.Run("help_returns_0", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runApp([]string{"help"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("help command: expected exit code 0, got %d", code)
+		}
+	})
+
+	t.Run("add_with_title_returns_0", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := runApp([]string{"add", "new task"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("add with title: expected exit code 0, got %d", code)
+		}
+	})
+}

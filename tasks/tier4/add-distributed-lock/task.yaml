@@ -1,0 +1,35 @@
+id: "tier4/add-distributed-lock"
+name: "添加分布式锁（内存模拟）"
+tier: 4
+type: "http-server"
+language: "go"
+estimated_minutes: 25
+
+api_contract:
+  - "func setupRouter() http.Handler"
+  - "type Locker interface"
+  - "func NewInMemoryLocker() Locker"
+  - "type Lock struct"
+
+verification_targets:
+  - id: VT-LOCK-01
+    category: concurrency
+    name: "并发操作无协调"
+    severity: high
+    description: "多个并发操作同一资源无锁保护"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 Locker 接口（Acquire/Release/Extend）"
+  - "实现 TTL 自动释放"
+  - "实现 owner 验证（只有锁持有者能释放）"
+  - "添加锁中间件保护写操作"
+
+code_smells:
+  - "并发写操作只有 mutex，无业务级锁"
+  - "没有 TTL，死锁风险"
+  - "没有 owner 概念，任何人可以释放锁"
+
+metadata:
+  files_to_modify: ["lock.go", "middleware.go", "handlers.go", "main.go"]
+  tags: ["feature", "distributed-lock", "concurrency"]

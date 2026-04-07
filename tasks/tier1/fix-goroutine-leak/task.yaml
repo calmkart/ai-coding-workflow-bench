@@ -1,0 +1,30 @@
+id: "tier1/fix-goroutine-leak"
+name: "修复 goroutine 泄漏"
+tier: 1
+type: "concurrency"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func NewPool(size int) *Pool"
+  - "func (p *Pool) Start()"
+  - "func (p *Pool) Stop()"
+  - "func (p *Pool) Submit(fn func())"
+
+verification_targets:
+  - id: VT-LEAK-01
+    category: concurrency
+    name: "goroutine 泄漏"
+    severity: critical
+    description: "Stop 后 worker goroutine 不退出"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 Stop 方法使 worker goroutine 正确退出"
+
+code_smells:
+  - "worker goroutine 无法感知 Stop 信号，永远阻塞在 channel 读取"
+
+metadata:
+  files_to_modify: ["pool.go"]
+  tags: ["bugfix", "goroutine-leak"]

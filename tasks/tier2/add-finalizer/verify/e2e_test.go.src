@@ -1,0 +1,123 @@
+package statemgr
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("finalizer_added_on_create", func(t *testing.T) {
+		store := NewStore()
+		res := &Resource{
+			Name:   "test",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		}
+		store.Put(res)
+
+		rec := NewSimpleReconciler(store)
+		rec.Reconcile("test")
+
+		got, _ := store.Get("test")
+		if len(got.Finalizers) == 0 {
+			t.Fatal("expected finalizer to be added")
+		}
+	})
+
+	t.Run("cleanup_on_delete", func(t *testing.T) {
+		store := NewStore()
+		now := time.Now()
+		res := &Resource{
+			Name:              "cleanup-test",
+			Spec:              ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status:            ResourceStatus{Phase: "Running", ReadyReplicas: 1},
+			Finalizers:        []string{"statemgr/cleanup"},
+			DeletionTimestamp: &now,
+		}
+		store.Put(res)
+
+		rec := NewSimpleReconciler(store)
+		rec.Reconcile("cleanup-test")
+
+		if len(store.CleanupLog) == 0 {
+			t.Fatal("expected cleanup to be logged")
+		}
+	})
+
+	t.Run("removed_after_finalizer_clear", func(t *testing.T) {
+		store := NewStore()
+		now := time.Now()
+		res := &Resource{
+			Name:              "delete-test",
+			Spec:              ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status:            ResourceStatus{Phase: "Running"},
+			Finalizers:        []string{"statemgr/cleanup"},
+			DeletionTimestamp: &now,
+		}
+		store.Put(res)
+
+		rec := NewSimpleReconciler(store)
+
+		// First reconcile should run cleanup and remove finalizer
+		rec.Reconcile("delete-test")
+
+		got, exists := store.Get("delete-test")
+		if exists && len(got.Finalizers) > 0 {
+			t.Fatal("expected finalizers to be cleared")
+		}
+	})
+
+	t.Run("no_delete_with_finalizers", func(t *testing.T) {
+		store := NewStore()
+		now := time.Now()
+		res := &Resource{
+			Name:              "keep-test",
+			Spec:              ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status:            ResourceStatus{Phase: "Running"},
+			Finalizers:        []string{"statemgr/cleanup", "other/finalizer"},
+			DeletionTimestamp: &now,
+		}
+		store.Put(res)
+
+		rec := NewSimpleReconciler(store)
+		result := rec.Reconcile("keep-test")
+
+		// Should requeue - still has "other/finalizer"
+		got, exists := store.Get("keep-test")
+		if !exists {
+			t.Fatal("resource should not be deleted while finalizers remain")
+		}
+		// Our finalizer should be removed, but other remains
+		for _, f := range got.Finalizers {
+			if f == "statemgr/cleanup" {
+				t.Fatal("our finalizer should be removed")
+			}
+		}
+		_ = result
+	})
+
+	t.Run("normal_reconcile_unchanged", func(t *testing.T) {
+		store := NewStore()
+		res := &Resource{
+			Name:   "normal",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		}
+		store.Put(res)
+
+		rec := NewSimpleReconciler(store)
+
+		// Multiple reconciles should converge
+		for i := 0; i < 5; i++ {
+			result := rec.Reconcile("normal")
+			if !result.Requeue {
+				break
+			}
+		}
+
+		got, _ := store.Get("normal")
+		if got.Status.ReadyReplicas != 1 {
+			t.Fatalf("expected 1 ready replica, got %d", got.Status.ReadyReplicas)
+		}
+	})
+}

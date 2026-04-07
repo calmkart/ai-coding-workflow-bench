@@ -1,0 +1,187 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func doReq(t *testing.T, ts *httptest.Server, method, path string, headers map[string]string, body string) *http.Response {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body != "" {
+		req, err = http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req, err = http.NewRequest(method, ts.URL+path, nil)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Create a todo for lock testing
+	resp := doReq(t, ts, "POST", "/todos", nil, `{"title":"lock-test","done":false}`)
+	defer resp.Body.Close()
+	var created map[string]any
+	json.NewDecoder(resp.Body).Decode(&created)
+	todoID := int(created["id"].(float64))
+
+	t.Run("acquire_lock", func(t *testing.T) {
+		body := fmt.Sprintf(`{"key":"todo:%d","ttl_seconds":30}`, todoID)
+		resp := doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": "user-1"}, body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+			t.Fatalf("acquire lock: expected 200/201, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("duplicate_acquire_returns_409", func(t *testing.T) {
+		body := fmt.Sprintf(`{"key":"todo:%d","ttl_seconds":30}`, todoID)
+		resp := doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": "user-2"}, body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("duplicate acquire: expected 409, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("owner_can_release_lock", func(t *testing.T) {
+		key := fmt.Sprintf("todo:%d", todoID)
+		resp := doReq(t, ts, "DELETE", "/locks/"+key, map[string]string{"X-Lock-Owner": "user-1"}, "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("release lock: expected 200/204, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("non_owner_cannot_release", func(t *testing.T) {
+		key := "test-lock-no"
+		// Acquire
+		doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": "owner-a"},
+			`{"key":"test-lock-no","ttl_seconds":30}`)
+
+		// Try release as different owner
+		resp := doReq(t, ts, "DELETE", "/locks/"+key, map[string]string{"X-Lock-Owner": "owner-b"}, "")
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+			t.Fatal("non-owner should not be able to release lock")
+		}
+	})
+
+	t.Run("extend_lock", func(t *testing.T) {
+		key := "extend-test"
+		doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": "ext-owner"},
+			`{"key":"extend-test","ttl_seconds":5}`)
+
+		resp := doReq(t, ts, "PUT", "/locks/"+key, map[string]string{"X-Lock-Owner": "ext-owner"},
+			`{"ttl_seconds":60}`)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("extend: expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("non_owner_cannot_extend", func(t *testing.T) {
+		key := "extend-test"
+		resp := doReq(t, ts, "PUT", "/locks/"+key, map[string]string{"X-Lock-Owner": "other"},
+			`{"ttl_seconds":60}`)
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Fatal("non-owner should not extend lock")
+		}
+	})
+
+	t.Run("ttl_expiry", func(t *testing.T) {
+		key := "ttl-test"
+		doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": "ttl-owner"},
+			`{"key":"ttl-test","ttl_seconds":1}`)
+
+		// Wait for TTL to expire
+		time.Sleep(2 * time.Second)
+
+		// Should be able to acquire again
+		resp := doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": "new-owner"},
+			`{"key":"ttl-test","ttl_seconds":30}`)
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusConflict {
+			t.Fatal("lock should have expired after TTL")
+		}
+	})
+
+	t.Run("concurrent_acquire_only_one_wins", func(t *testing.T) {
+		var wg sync.WaitGroup
+		wins := make(chan string, 10)
+		key := "race-test"
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(owner string) {
+				defer wg.Done()
+				resp := doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": owner},
+					fmt.Sprintf(`{"key":"%s","ttl_seconds":30}`, key))
+				defer resp.Body.Close()
+				if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
+					wins <- owner
+				}
+			}(fmt.Sprintf("racer-%d", i))
+		}
+
+		wg.Wait()
+		close(wins)
+
+		count := 0
+		for range wins {
+			count++
+		}
+		if count != 1 {
+			t.Fatalf("expected exactly 1 winner, got %d", count)
+		}
+	})
+
+	t.Run("read_does_not_need_lock", func(t *testing.T) {
+		resp := doReq(t, ts, "GET", "/todos", nil, "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("read should not need lock, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("max_ttl_enforced", func(t *testing.T) {
+		resp := doReq(t, ts, "POST", "/locks", map[string]string{"X-Lock-Owner": "max-ttl"},
+			`{"key":"max-ttl-test","ttl_seconds":9999}`)
+		defer resp.Body.Close()
+		// Should either cap TTL or return error
+		if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
+			var lock map[string]any
+			json.NewDecoder(resp.Body).Decode(&lock)
+			// If successful, TTL should be capped
+		}
+		// Acceptable: 400 for TTL too large, or 200/201 with capped TTL
+		if resp.StatusCode == http.StatusBadRequest ||
+			resp.StatusCode == http.StatusCreated ||
+			resp.StatusCode == http.StatusOK {
+			// OK
+		} else {
+			t.Fatalf("max TTL: unexpected status %d", resp.StatusCode)
+		}
+	})
+}

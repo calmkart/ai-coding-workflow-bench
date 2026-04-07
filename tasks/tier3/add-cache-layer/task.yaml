@@ -1,0 +1,29 @@
+id: "tier3/add-cache-layer"
+name: "添加带 TTL 的内存缓存层"
+tier: 3
+type: "http-server"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-CACHE-01
+    category: performance
+    name: "无缓存"
+    severity: medium
+    description: "每次 GET 请求都直接查询 store，需要添加内存缓存层"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加带 TTL 的内存缓存层，GET 请求先查缓存，写操作清除缓存"
+
+code_smells:
+  - "GET /todos 每次都遍历完整列表"
+  - "GET /todos/{id} 每次线性扫描"
+  - "无缓存机制"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["feature", "cache", "performance"]

@@ -1,0 +1,28 @@
+id: "tier3/implement-pool"
+name: "实现泛型对象池"
+tier: 3
+type: "library"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "type Pool[T any] struct"
+  - "func NewPool[T any](factory func() T, opts ...PoolOption) *Pool[T]"
+
+verification_targets:
+  - id: VT-POOL-01
+    category: feature
+    name: "无对象池"
+    severity: medium
+    description: "需要实现泛型对象池 Pool[T]：Get/Put/New，并发安全，统计"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现泛型对象池，支持 Get/Put、最大池大小、统计信息"
+
+code_smells:
+  - "频繁分配和回收对象造成 GC 压力"
+
+metadata:
+  files_to_modify: ["pool.go"]
+  tags: ["feature", "performance", "pool"]

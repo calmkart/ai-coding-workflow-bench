@@ -1,0 +1,28 @@
+id: "tier1/add-min-max"
+name: "添加泛型 Min/Max 函数"
+tier: 1
+type: "library"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func Min[T cmp.Ordered](a, b T) T"
+  - "func Max[T cmp.Ordered](a, b T) T"
+
+verification_targets:
+  - id: VT-FEAT-01
+    category: feature
+    name: "缺少 Min/Max 函数"
+    severity: medium
+    description: "需要添加泛型 Min 和 Max 函数"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "添加泛型 Min 和 Max 函数"
+
+code_smells:
+  - "缺少通用的 Min/Max 工具函数"
+
+metadata:
+  files_to_modify: ["strkit.go"]
+  tags: ["feature", "generics"]

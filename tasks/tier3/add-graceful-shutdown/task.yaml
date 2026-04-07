@@ -1,0 +1,29 @@
+id: "tier3/add-graceful-shutdown"
+name: "实现多 goroutine 优雅关闭"
+tier: 3
+type: "concurrency"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type ServiceGroup struct"
+  - "func NewServiceGroup() *ServiceGroup"
+
+verification_targets:
+  - id: VT-SHUT-01
+    category: correctness
+    name: "无优雅关闭"
+    severity: high
+    description: "多 goroutine 服务无优雅关闭，需要 signal + context 级联取消"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 ServiceGroup 管理多个 goroutine 服务的优雅关闭"
+
+code_smells:
+  - "goroutine 无停止机制"
+  - "直接 os.Exit 无清理"
+
+metadata:
+  files_to_modify: ["service.go"]
+  tags: ["feature", "concurrency", "graceful-shutdown"]

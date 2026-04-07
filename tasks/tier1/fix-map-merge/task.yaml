@@ -1,0 +1,27 @@
+id: "tier1/fix-map-merge"
+name: "修复 MergeMaps 浅拷贝 bug"
+tier: 1
+type: "library"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func MergeMaps(maps ...map[string]string) map[string]string"
+
+verification_targets:
+  - id: VT-COPY-01
+    category: correctness
+    name: "浅拷贝导致原 map 被修改"
+    severity: high
+    description: "MergeMaps 返回的 map 修改后会影响原 map"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 MergeMaps 为深拷贝，确保修改返回值不影响原 map"
+
+code_smells:
+  - "MergeMaps 直接引用输入 map 而非拷贝"
+
+metadata:
+  files_to_modify: ["strkit.go"]
+  tags: ["bugfix", "deep-copy"]

@@ -1,0 +1,29 @@
+id: "tier3/implement-pipeline"
+name: "实现类型安全 Pipeline"
+tier: 3
+type: "library"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type Pipeline[I, O any] struct"
+  - "func NewPipeline[I, O any](fn func(I) (O, error)) *Pipeline[I, O]"
+
+verification_targets:
+  - id: VT-PIPE-01
+    category: feature
+    name: "无管道模式"
+    severity: medium
+    description: "需要实现类型安全的 Pipeline：Stage 链式调用，错误传播"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 Pipeline[I,O] 支持链式 Stage 调用和错误传播"
+
+code_smells:
+  - "数据处理步骤用 interface{} 手动编排"
+  - "错误处理不一致"
+
+metadata:
+  files_to_modify: ["pipeline.go"]
+  tags: ["feature", "pattern", "pipeline"]

@@ -1,0 +1,27 @@
+id: "tier1/fix-handler-bug"
+name: "修复分页 off-by-one bug"
+tier: 1
+type: "http-server"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-ERROR-01
+    category: error_handling
+    name: "错误吞没"
+    severity: high
+    description: "修复 bug 时可能引入新的错误处理遗漏"
+    detection: "errcheck"
+
+refactoring_targets:
+  - "修复 GET /todos 分页的 off-by-one bug（请求 page=2 时返回了 page=3 的数据）"
+
+code_smells:
+  - "分页计算中 offset = page * pageSize 应为 (page-1) * pageSize"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["bugfix", "pagination"]

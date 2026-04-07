@@ -1,0 +1,34 @@
+id: "tier4/implement-expression-parser"
+name: "实现数学表达式解析器"
+tier: 4
+type: "library"
+language: "go"
+estimated_minutes: 25
+
+api_contract:
+  - "type Token struct"
+  - "type Expr interface"
+  - "func Tokenize(input string) ([]Token, error)"
+  - "func Parse(tokens []Token) (Expr, error)"
+  - "func Evaluate(expr Expr) (float64, error)"
+  - "func Calc(input string) (float64, error)"
+
+verification_targets:
+  - id: VT-EXPR-01
+    category: parsing
+    name: "无表达式解析器"
+    severity: high
+    description: "需要实现 tokenize -> parse -> evaluate 三阶段"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现词法分析器（tokenizer）"
+  - "实现递归下降解析器"
+  - "实现 AST 求值"
+
+code_smells:
+  - "只有空的接口定义"
+
+metadata:
+  files_to_modify: ["parser.go"]
+  tags: ["feature", "parser", "expression", "ast"]

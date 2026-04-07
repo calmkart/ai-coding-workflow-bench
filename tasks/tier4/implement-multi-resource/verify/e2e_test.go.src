@@ -1,0 +1,274 @@
+package multireconciler
+
+import (
+	"sync"
+	"testing"
+)
+
+func runReconcile(rec *MultiReconciler, name string, maxIter int) {
+	for i := 0; i < maxIter; i++ {
+		result := rec.Reconcile(name)
+		if !result.Requeue {
+			break
+		}
+	}
+}
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("create_application_cascades_service", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		store.PutApplication(&Application{
+			Metadata: Metadata{Name: "myapp", Kind: "Application", UID: "uid-app-1"},
+			Spec:     ApplicationSpec{ServicePort: 8080, Replicas: 2, Image: "nginx"},
+			Status:   ApplicationStatus{Phase: "Pending"},
+		})
+
+		runReconcile(rec, "myapp", 20)
+
+		// Service should be created
+		services := store.ListServices()
+		found := false
+		for _, svc := range services {
+			for _, ref := range svc.Metadata.OwnerReferences {
+				if ref.Name == "myapp" {
+					found = true
+					if svc.Spec.Port != 8080 {
+						t.Fatalf("service port should be 8080, got %d", svc.Spec.Port)
+					}
+				}
+			}
+		}
+		if !found {
+			t.Fatal("Service should be created as dependent of Application")
+		}
+	})
+
+	t.Run("create_service_cascades_endpoint", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		store.PutApplication(&Application{
+			Metadata: Metadata{Name: "epapp", Kind: "Application", UID: "uid-ep-1"},
+			Spec:     ApplicationSpec{ServicePort: 9090, Replicas: 1, Image: "app"},
+			Status:   ApplicationStatus{Phase: "Pending"},
+		})
+
+		runReconcile(rec, "epapp", 30)
+
+		// Endpoint should be created
+		endpoints := store.ListEndpoints()
+		found := false
+		for _, ep := range endpoints {
+			for _, ref := range ep.Metadata.OwnerReferences {
+				if ref.Kind == "Service" {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatal("Endpoint should be created as dependent of Service")
+		}
+	})
+
+	t.Run("status_propagates_upward", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		store.PutApplication(&Application{
+			Metadata: Metadata{Name: "status-app", Kind: "Application", UID: "uid-status-1"},
+			Spec:     ApplicationSpec{ServicePort: 80, Replicas: 1, Image: "web"},
+			Status:   ApplicationStatus{Phase: "Pending"},
+		})
+
+		// Run enough times for full cascade
+		runReconcile(rec, "status-app", 50)
+
+		app, _ := store.GetApplication("status-app")
+		if app.Status.Phase != "Ready" {
+			t.Fatalf("Application should be Ready when all dependents are ready, got %s", app.Status.Phase)
+		}
+	})
+
+	t.Run("delete_cascades_down", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		store.PutApplication(&Application{
+			Metadata: Metadata{Name: "del-app", Kind: "Application", UID: "uid-del-1"},
+			Spec:     ApplicationSpec{ServicePort: 80, Replicas: 1, Image: "web"},
+			Status:   ApplicationStatus{Phase: "Pending"},
+		})
+
+		runReconcile(rec, "del-app", 50)
+
+		// Verify dependents exist
+		servicesBefore := store.ListServices()
+		endpointsBefore := store.ListEndpoints()
+		if len(servicesBefore) == 0 || len(endpointsBefore) == 0 {
+			t.Fatal("dependents should exist before delete")
+		}
+
+		// Delete application
+		store.DeleteApplication("del-app")
+		runReconcile(rec, "del-app", 20)
+
+		// Dependents should be cleaned up
+		servicesAfter := store.ListServices()
+		endpointsAfter := store.ListEndpoints()
+
+		for _, svc := range servicesAfter {
+			for _, ref := range svc.Metadata.OwnerReferences {
+				if ref.Name == "del-app" {
+					t.Fatal("Service owned by deleted app should be cleaned up")
+				}
+			}
+		}
+		for _, ep := range endpointsAfter {
+			for _, ref := range ep.Metadata.OwnerReferences {
+				if ref.Kind == "Service" {
+					// Check if the owner service still exists
+					ownerExists := false
+					for _, svc := range servicesAfter {
+						if svc.Metadata.Name == ref.Name {
+							ownerExists = true
+						}
+					}
+					if !ownerExists {
+						t.Fatal("Endpoint owned by deleted service should be cleaned up")
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("owner_reference_set_correctly", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		store.PutApplication(&Application{
+			Metadata: Metadata{Name: "ref-app", Kind: "Application", UID: "uid-ref-1"},
+			Spec:     ApplicationSpec{ServicePort: 80, Replicas: 1, Image: "web"},
+			Status:   ApplicationStatus{Phase: "Pending"},
+		})
+
+		runReconcile(rec, "ref-app", 50)
+
+		services := store.ListServices()
+		for _, svc := range services {
+			hasOwner := false
+			for _, ref := range svc.Metadata.OwnerReferences {
+				if ref.Kind == "Application" && ref.UID == "uid-ref-1" {
+					hasOwner = true
+				}
+			}
+			if !hasOwner {
+				t.Fatal("Service should have OwnerReference to Application")
+			}
+		}
+	})
+
+	t.Run("reconcile_idempotent", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		store.PutApplication(&Application{
+			Metadata: Metadata{Name: "idempotent-app", Kind: "Application", UID: "uid-idem-1"},
+			Spec:     ApplicationSpec{ServicePort: 80, Replicas: 1, Image: "web"},
+			Status:   ApplicationStatus{Phase: "Pending"},
+		})
+
+		// Run many times
+		runReconcile(rec, "idempotent-app", 50)
+
+		svcCount := 0
+		for _, svc := range store.ListServices() {
+			for _, ref := range svc.Metadata.OwnerReferences {
+				if ref.Name == "idempotent-app" {
+					svcCount++
+				}
+			}
+		}
+
+		// Should create exactly 1 service, not duplicates
+		if svcCount != 1 {
+			t.Fatalf("expected 1 service for app, got %d (not idempotent)", svcCount)
+		}
+	})
+
+	t.Run("resource_graph_defines_dependencies", func(t *testing.T) {
+		graph := NewResourceGraph()
+
+		deps := graph.DependentsOf("Application")
+		found := false
+		for _, d := range deps {
+			if d == "Service" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("Application should depend on Service")
+		}
+
+		deps2 := graph.DependentsOf("Service")
+		found2 := false
+		for _, d := range deps2 {
+			if d == "Endpoint" {
+				found2 = true
+			}
+		}
+		if !found2 {
+			t.Fatal("Service should depend on Endpoint")
+		}
+	})
+
+	t.Run("nonexistent_application", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		result := rec.Reconcile("nonexistent")
+		if result.Requeue {
+			t.Fatal("should not requeue for nonexistent resource")
+		}
+	})
+
+	t.Run("concurrent_reconcile", func(t *testing.T) {
+		store := NewStore()
+		graph := NewResourceGraph()
+		rec := NewMultiReconciler(store, graph)
+
+		for i := 0; i < 5; i++ {
+			store.PutApplication(&Application{
+				Metadata: Metadata{Name: string(rune('a' + i)), Kind: "Application", UID: string(rune('a' + i))},
+				Spec:     ApplicationSpec{ServicePort: 80 + i, Replicas: 1, Image: "web"},
+				Status:   ApplicationStatus{Phase: "Pending"},
+			})
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				runReconcile(rec, name, 50)
+			}(string(rune('a' + i)))
+		}
+		wg.Wait()
+
+		// All should be Ready
+		for i := 0; i < 5; i++ {
+			app, _ := store.GetApplication(string(rune('a' + i)))
+			if app.Status.Phase != "Ready" {
+				t.Fatalf("app %s: expected Ready, got %s", app.Metadata.Name, app.Status.Phase)
+			}
+		}
+	})
+}

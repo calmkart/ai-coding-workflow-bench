@@ -1,0 +1,234 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+)
+
+func makeRequest(t *testing.T, ts *httptest.Server, method, path, userID, body string) *http.Response {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body != "" {
+		req, err = http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+	} else {
+		req, err = http.NewRequest(method, ts.URL+path, nil)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userID != "" {
+		req.Header.Set("X-User-ID", userID)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("health_no_auth_required", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("health should not require auth, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("no_user_id_returns_401", func(t *testing.T) {
+		resp := makeRequest(t, ts, "GET", "/todos", "", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 without X-User-ID, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("unknown_user_returns_403", func(t *testing.T) {
+		resp := makeRequest(t, ts, "GET", "/todos", "unknown-user", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403 for user without role, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("viewer_can_list_todos", func(t *testing.T) {
+		resp := makeRequest(t, ts, "GET", "/todos", "viewer1", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("viewer should list todos, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("viewer_cannot_create_todo", func(t *testing.T) {
+		body := `{"title":"test","done":false}`
+		resp := makeRequest(t, ts, "POST", "/todos", "viewer1", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("viewer should not create, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("viewer_cannot_delete_todo", func(t *testing.T) {
+		resp := makeRequest(t, ts, "DELETE", "/todos/1", "viewer1", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("viewer should not delete, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("editor_can_create_todo", func(t *testing.T) {
+		body := `{"title":"editor-todo","done":false}`
+		resp := makeRequest(t, ts, "POST", "/todos", "editor1", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("editor should create, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("editor_can_list_todos", func(t *testing.T) {
+		resp := makeRequest(t, ts, "GET", "/todos", "editor1", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("editor should list (inherited from viewer), got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("editor_can_update_todo", func(t *testing.T) {
+		// First create a todo as editor
+		body := `{"title":"to-update","done":false}`
+		resp := makeRequest(t, ts, "POST", "/todos", "editor1", body)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		updateBody := `{"title":"updated","done":true}`
+		resp2 := makeRequest(t, ts, "PUT", fmt.Sprintf("/todos/%d", id), "editor1", updateBody)
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("editor should update, got %d", resp2.StatusCode)
+		}
+	})
+
+	t.Run("editor_cannot_delete_todo", func(t *testing.T) {
+		resp := makeRequest(t, ts, "DELETE", "/todos/1", "editor1", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("editor should not delete, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("admin_can_create", func(t *testing.T) {
+		body := `{"title":"admin-todo","done":false}`
+		resp := makeRequest(t, ts, "POST", "/todos", "admin1", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("admin should create, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("admin_can_delete", func(t *testing.T) {
+		// Create then delete
+		body := `{"title":"to-delete","done":false}`
+		resp := makeRequest(t, ts, "POST", "/todos", "admin1", body)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		resp2 := makeRequest(t, ts, "DELETE", fmt.Sprintf("/todos/%d", id), "admin1", "")
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusNoContent {
+			t.Fatalf("admin should delete, got %d", resp2.StatusCode)
+		}
+	})
+
+	t.Run("admin_can_list", func(t *testing.T) {
+		resp := makeRequest(t, ts, "GET", "/todos", "admin1", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("admin should list (inherited), got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("role_inheritance_viewer_to_editor", func(t *testing.T) {
+		resp := makeRequest(t, ts, "GET", "/todos", "editor1", "")
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("editor should inherit viewer read, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("role_inheritance_editor_to_admin", func(t *testing.T) {
+		body := `{"title":"admin-create","done":false}`
+		resp := makeRequest(t, ts, "POST", "/todos", "admin1", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("admin should inherit editor create, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("concurrent_role_check", func(t *testing.T) {
+		var wg sync.WaitGroup
+		errCh := make(chan string, 20)
+
+		for i := 0; i < 20; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				resp := makeRequest(t, ts, "GET", "/todos", "viewer1", "")
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					errCh <- fmt.Sprintf("concurrent read failed: %d", resp.StatusCode)
+				}
+			}()
+		}
+
+		wg.Wait()
+		close(errCh)
+
+		for e := range errCh {
+			t.Fatal(e)
+		}
+	})
+
+	t.Run("viewer_can_get_single_todo", func(t *testing.T) {
+		body := `{"title":"view-this","done":false}`
+		resp := makeRequest(t, ts, "POST", "/todos", "admin1", body)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		resp2 := makeRequest(t, ts, "GET", fmt.Sprintf("/todos/%d", id), "viewer1", "")
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("viewer should get single todo, got %d", resp2.StatusCode)
+		}
+	})
+
+	t.Run("viewer_cannot_update_todo", func(t *testing.T) {
+		body := `{"title":"nope","done":true}`
+		resp := makeRequest(t, ts, "PUT", "/todos/1", "viewer1", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("viewer should not update, got %d", resp.StatusCode)
+		}
+	})
+}

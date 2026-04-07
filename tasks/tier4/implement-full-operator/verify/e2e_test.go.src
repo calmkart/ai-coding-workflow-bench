@@ -1,0 +1,270 @@
+package operator
+
+import (
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("full_lifecycle_pending_to_running", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "app", Generation: 1},
+			Spec:     ResourceSpec{Replicas: 3, Image: "nginx"},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		runner := NewRunner(rec)
+		runner.RunOnce("app", 100)
+
+		res, _ := store.Get("app")
+		if res.Status.Phase != "Running" {
+			t.Fatalf("expected Running, got %s", res.Status.Phase)
+		}
+		if res.Status.ReadyReplicas != 3 {
+			t.Fatalf("expected 3 ready replicas, got %d", res.Status.ReadyReplicas)
+		}
+	})
+
+	t.Run("conditions_set_correctly", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "cond-app", Generation: 1},
+			Spec:     ResourceSpec{Replicas: 2, Image: "app"},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		runner := NewRunner(rec)
+		runner.RunOnce("cond-app", 100)
+
+		res, _ := store.Get("cond-app")
+
+		// Should have conditions
+		if len(res.Status.Conditions) == 0 {
+			t.Fatal("should have conditions after reconcile")
+		}
+
+		// Find Ready condition
+		readyFound := false
+		for _, c := range res.Status.Conditions {
+			if c.Type == "Ready" {
+				readyFound = true
+				if c.Status != "True" {
+					t.Fatalf("Ready condition should be True when all replicas ready, got %s", c.Status)
+				}
+			}
+		}
+		if !readyFound {
+			t.Fatal("missing Ready condition")
+		}
+	})
+
+	t.Run("progressing_state", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "prog-app", Generation: 1},
+			Spec:     ResourceSpec{Replicas: 5, Image: "app"},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+
+		// First reconcile: Pending → Progressing
+		rec.Reconcile("prog-app")
+		res, _ := store.Get("prog-app")
+		if res.Status.Phase != "Progressing" {
+			t.Fatalf("after first reconcile: expected Progressing, got %s", res.Status.Phase)
+		}
+
+		// Find Progressing condition
+		hasProgressing := false
+		for _, c := range res.Status.Conditions {
+			if c.Type == "Progressing" && c.Status == "True" {
+				hasProgressing = true
+			}
+		}
+		if !hasProgressing {
+			t.Fatal("should have Progressing condition during rollout")
+		}
+	})
+
+	t.Run("observed_generation_updated", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "gen-app", Generation: 5},
+			Spec:     ResourceSpec{Replicas: 1, Image: "app"},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		runner := NewRunner(rec)
+		runner.RunOnce("gen-app", 100)
+
+		res, _ := store.Get("gen-app")
+		if res.Status.ObservedGeneration != 5 {
+			t.Fatalf("ObservedGeneration should be 5, got %d", res.Status.ObservedGeneration)
+		}
+	})
+
+	t.Run("event_recording", func(t *testing.T) {
+		store := NewStore()
+		recorder := NewEventRecorder()
+
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "evt-app", Generation: 1},
+			Spec:     ResourceSpec{Replicas: 2, Image: "app"},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		rec.SetEventRecorder(recorder)
+		runner := NewRunner(rec)
+		runner.RunOnce("evt-app", 100)
+
+		events := recorder.Events("evt-app")
+		if len(events) == 0 {
+			t.Fatal("should have recorded events")
+		}
+
+		// Should have at least a "Normal" event for state transitions
+		hasNormal := false
+		for _, e := range events {
+			if e.Type == "Normal" {
+				hasNormal = true
+			}
+		}
+		if !hasNormal {
+			t.Fatal("should have Normal events for state transitions")
+		}
+	})
+
+	t.Run("resource_not_found", func(t *testing.T) {
+		store := NewStore()
+		rec := NewSimpleReconciler(store)
+		result := rec.Reconcile("nonexistent")
+		if result.Requeue {
+			t.Fatal("should not requeue for nonexistent resource")
+		}
+	})
+
+	t.Run("requeue_after_duration", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "rq-app", Generation: 1},
+			Spec:     ResourceSpec{Replicas: 3, Image: "app"},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		result := rec.Reconcile("rq-app")
+		if !result.Requeue {
+			t.Fatal("should requeue while progressing")
+		}
+		if result.RequeueAfter <= 0 {
+			t.Fatal("RequeueAfter should be positive for progressing resource")
+		}
+	})
+
+	t.Run("store_list", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "a"},
+			Spec:     ResourceSpec{Replicas: 1},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "b"},
+			Spec:     ResourceSpec{Replicas: 1},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		list := store.List()
+		if len(list) != 2 {
+			t.Fatalf("expected 2 resources, got %d", len(list))
+		}
+	})
+
+	t.Run("store_delete", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "del-me"},
+		})
+		store.Delete("del-me")
+		_, ok := store.Get("del-me")
+		if ok {
+			t.Fatal("resource should be deleted")
+		}
+	})
+
+	t.Run("condition_transition_time_stable", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Metadata: Metadata{Name: "stable-app", Generation: 1},
+			Spec:     ResourceSpec{Replicas: 3, Image: "app"},
+			Status:   ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+
+		// First reconcile
+		rec.Reconcile("stable-app")
+		res, _ := store.Get("stable-app")
+		var firstTransition time.Time
+		for _, c := range res.Status.Conditions {
+			if c.Type == "Progressing" {
+				firstTransition = c.LastTransitionTime
+			}
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		// Second reconcile — Progressing should still be True, transition time unchanged
+		rec.Reconcile("stable-app")
+		res, _ = store.Get("stable-app")
+		for _, c := range res.Status.Conditions {
+			if c.Type == "Progressing" && c.Status == "True" {
+				if !c.LastTransitionTime.Equal(firstTransition) {
+					t.Fatal("LastTransitionTime should not change if status is the same")
+				}
+			}
+		}
+	})
+
+	t.Run("concurrent_reconcile", func(t *testing.T) {
+		store := NewStore()
+		for i := 0; i < 10; i++ {
+			store.Put(&Resource{
+				Metadata: Metadata{Name: string(rune('a' + i))},
+				Spec:     ResourceSpec{Replicas: 2},
+				Status:   ResourceStatus{Phase: "Pending"},
+			})
+		}
+
+		rec := NewSimpleReconciler(store)
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(name string) {
+				defer wg.Done()
+				runner := NewRunner(rec)
+				runner.RunOnce(name, 50)
+			}(string(rune('a' + i)))
+		}
+		wg.Wait()
+
+		// All should be Running
+		for i := 0; i < 10; i++ {
+			name := string(rune('a' + i))
+			res, ok := store.Get(name)
+			if !ok {
+				t.Fatalf("resource %s missing", name)
+			}
+			if res.Status.Phase != "Running" {
+				t.Fatalf("resource %s: expected Running, got %s", name, res.Status.Phase)
+			}
+		}
+	})
+}

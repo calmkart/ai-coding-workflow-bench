@@ -1,0 +1,47 @@
+package strkit
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("ascii_reverse", func(t *testing.T) {
+		got := Reverse("hello")
+		if got != "olleh" {
+			t.Fatalf("Reverse(hello) = %q, want olleh", got)
+		}
+	})
+
+	t.Run("chinese_reverse", func(t *testing.T) {
+		got := Reverse("你好世界")
+		if got != "界世好你" {
+			t.Fatalf("Reverse(你好世界) = %q, want 界世好你", got)
+		}
+	})
+
+	t.Run("emoji_reverse", func(t *testing.T) {
+		got := Reverse("abc😀def")
+		if got != "fed😀cba" {
+			t.Fatalf("Reverse(abc😀def) = %q, want fed😀cba", got)
+		}
+	})
+
+	t.Run("single_char", func(t *testing.T) {
+		got := Reverse("a")
+		if got != "a" {
+			t.Fatalf("Reverse(a) = %q, want a", got)
+		}
+	})
+
+	t.Run("empty_string", func(t *testing.T) {
+		got := Reverse("")
+		if got != "" {
+			t.Fatalf("Reverse('') = %q, want empty", got)
+		}
+	})
+
+	t.Run("mixed_unicode", func(t *testing.T) {
+		got := Reverse("a你b")
+		if got != "b你a" {
+			t.Fatalf("Reverse(a你b) = %q, want b你a", got)
+		}
+	})
+}

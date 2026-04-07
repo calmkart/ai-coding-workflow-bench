@@ -1,0 +1,267 @@
+package actor
+
+import (
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// echoActor replies with the same message.
+type echoActor struct{}
+
+func (a *echoActor) Receive(ctx ActorContext, msg Message) {
+	if msg.From != nil {
+		ctx.Reply(Message{Type: "echo", Payload: msg.Payload})
+	}
+}
+
+// counterActor counts messages received.
+type counterActor struct {
+	count atomic.Int32
+}
+
+func (a *counterActor) Receive(ctx ActorContext, msg Message) {
+	a.count.Add(1)
+}
+
+// accumulatorActor maintains ordered state.
+type accumulatorActor struct {
+	mu     sync.Mutex
+	values []int
+}
+
+func (a *accumulatorActor) Receive(ctx ActorContext, msg Message) {
+	if v, ok := msg.Payload.(int); ok {
+		a.mu.Lock()
+		a.values = append(a.values, v)
+		a.mu.Unlock()
+	}
+}
+
+// forwarderActor forwards messages to another actor.
+type forwarderActor struct {
+	target string
+}
+
+func (a *forwarderActor) Receive(ctx ActorContext, msg Message) {
+	ref := ctx.System().Lookup(a.target)
+	if ref != nil {
+		ref.Send(Message{Type: msg.Type, Payload: msg.Payload, From: ctx.Self()})
+	}
+}
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("spawn_and_send", func(t *testing.T) {
+		sys := NewActorSystem()
+		defer sys.Shutdown()
+
+		counter := &counterActor{}
+		ref := sys.Spawn("counter", counter)
+		if ref == nil {
+			t.Fatal("spawn should return ref")
+		}
+
+		ref.Send(Message{Type: "inc"})
+		ref.Send(Message{Type: "inc"})
+		ref.Send(Message{Type: "inc"})
+
+		time.Sleep(100 * time.Millisecond)
+
+		if counter.count.Load() != 3 {
+			t.Fatalf("expected 3 messages, got %d", counter.count.Load())
+		}
+	})
+
+	t.Run("message_order_preserved", func(t *testing.T) {
+		sys := NewActorSystem()
+		defer sys.Shutdown()
+
+		acc := &accumulatorActor{}
+		ref := sys.Spawn("acc", acc)
+
+		for i := 0; i < 100; i++ {
+			ref.Send(Message{Type: "add", Payload: i})
+		}
+
+		time.Sleep(200 * time.Millisecond)
+
+		acc.mu.Lock()
+		values := make([]int, len(acc.values))
+		copy(values, acc.values)
+		acc.mu.Unlock()
+
+		if len(values) != 100 {
+			t.Fatalf("expected 100 values, got %d", len(values))
+		}
+
+		// Messages should be processed in order
+		for i, v := range values {
+			if v != i {
+				t.Fatalf("order violation at %d: expected %d, got %d", i, i, v)
+			}
+		}
+	})
+
+	t.Run("actor_to_actor_communication", func(t *testing.T) {
+		sys := NewActorSystem()
+		defer sys.Shutdown()
+
+		counter := &counterActor{}
+		sys.Spawn("counter", counter)
+
+		fwd := &forwarderActor{target: "counter"}
+		fwdRef := sys.Spawn("forwarder", fwd)
+
+		fwdRef.Send(Message{Type: "hello"})
+		fwdRef.Send(Message{Type: "world"})
+
+		time.Sleep(200 * time.Millisecond)
+
+		if counter.count.Load() != 2 {
+			t.Fatalf("counter should receive 2 forwarded messages, got %d", counter.count.Load())
+		}
+	})
+
+	t.Run("lookup_actor", func(t *testing.T) {
+		sys := NewActorSystem()
+		defer sys.Shutdown()
+
+		sys.Spawn("test-actor", &counterActor{})
+
+		ref := sys.Lookup("test-actor")
+		if ref == nil {
+			t.Fatal("lookup should find spawned actor")
+		}
+		if ref.Name() != "test-actor" {
+			t.Fatalf("wrong name: %s", ref.Name())
+		}
+
+		missing := sys.Lookup("nonexistent")
+		if missing != nil {
+			t.Fatal("lookup should return nil for missing actor")
+		}
+	})
+
+	t.Run("reply_mechanism", func(t *testing.T) {
+		sys := NewActorSystem()
+		defer sys.Shutdown()
+
+		// Create echo actor
+		sys.Spawn("echo", &echoActor{})
+
+		// Create receiver that checks replies
+		received := make(chan Message, 1)
+		receiver := &callbackActor{fn: func(ctx ActorContext, msg Message) {
+			if msg.Type == "echo" {
+				received <- msg
+			} else if msg.Type == "request" {
+				echoRef := ctx.System().Lookup("echo")
+				if echoRef != nil {
+					echoRef.Send(Message{Type: "ping", Payload: "data", From: ctx.Self()})
+				}
+			}
+		}}
+		recRef := sys.Spawn("receiver", receiver)
+
+		recRef.Send(Message{Type: "request"})
+
+		select {
+		case msg := <-received:
+			if msg.Payload != "data" {
+				t.Fatalf("reply payload: %v", msg.Payload)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("did not receive reply within timeout")
+		}
+	})
+
+	t.Run("shutdown_stops_actors", func(t *testing.T) {
+		sys := NewActorSystem()
+
+		counter := &counterActor{}
+		ref := sys.Spawn("c", counter)
+
+		ref.Send(Message{Type: "a"})
+		time.Sleep(50 * time.Millisecond)
+
+		sys.Shutdown()
+
+		// After shutdown, sending should not panic (just drop or no-op)
+		// This is a best-effort check
+		func() {
+			defer func() {
+				// recover from potential panic on send to closed channel
+				recover()
+			}()
+			ref.Send(Message{Type: "b"})
+		}()
+	})
+
+	t.Run("many_actors_concurrent", func(t *testing.T) {
+		sys := NewActorSystem()
+		defer sys.Shutdown()
+
+		var totalCount atomic.Int32
+		counters := make([]*counterActor, 10)
+		refs := make([]*ActorRef, 10)
+
+		for i := 0; i < 10; i++ {
+			counters[i] = &counterActor{}
+			refs[i] = sys.Spawn(string(rune('a'+i))+"actor", counters[i])
+		}
+
+		// Send 100 messages to each actor concurrently
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			for j := 0; j < 100; j++ {
+				wg.Add(1)
+				go func(ref *ActorRef) {
+					defer wg.Done()
+					ref.Send(Message{Type: "inc"})
+				}(refs[i])
+			}
+		}
+		wg.Wait()
+
+		time.Sleep(500 * time.Millisecond)
+
+		for i, c := range counters {
+			totalCount.Add(c.count.Load())
+			if c.count.Load() != 100 {
+				t.Fatalf("actor %d: expected 100 messages, got %d", i, c.count.Load())
+			}
+		}
+
+		if totalCount.Load() != 1000 {
+			t.Fatalf("total: expected 1000, got %d", totalCount.Load())
+		}
+	})
+
+	t.Run("self_reference", func(t *testing.T) {
+		sys := NewActorSystem()
+		defer sys.Shutdown()
+
+		var selfName string
+		cb := &callbackActor{fn: func(ctx ActorContext, msg Message) {
+			selfName = ctx.Self().Name()
+		}}
+		ref := sys.Spawn("self-test", cb)
+
+		ref.Send(Message{Type: "check"})
+		time.Sleep(100 * time.Millisecond)
+
+		if selfName != "self-test" {
+			t.Fatalf("self should be 'self-test', got '%s'", selfName)
+		}
+	})
+}
+
+// callbackActor uses a function for Receive.
+type callbackActor struct {
+	fn func(ctx ActorContext, msg Message)
+}
+
+func (a *callbackActor) Receive(ctx ActorContext, msg Message) {
+	a.fn(ctx, msg)
+}

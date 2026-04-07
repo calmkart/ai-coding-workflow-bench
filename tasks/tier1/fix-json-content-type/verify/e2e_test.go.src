@@ -1,0 +1,75 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Seed a todo
+	resp, err := http.Post(ts.URL+"/todos", "application/json",
+		strings.NewReader(`{"title":"test todo","done":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	t.Run("list_todos_has_json_content_type", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/json") {
+			t.Fatalf("GET /todos Content-Type: expected application/json, got %q", ct)
+		}
+	})
+
+	t.Run("get_todo_has_json_content_type", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/json") {
+			t.Fatalf("GET /todos/1 Content-Type: expected application/json, got %q", ct)
+		}
+	})
+
+	t.Run("create_todo_has_json_content_type", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"another","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/json") {
+			t.Fatalf("POST /todos Content-Type: expected application/json, got %q", ct)
+		}
+	})
+
+	t.Run("health_has_json_content_type", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/json") {
+			t.Fatalf("GET /health Content-Type: expected application/json, got %q", ct)
+		}
+	})
+}

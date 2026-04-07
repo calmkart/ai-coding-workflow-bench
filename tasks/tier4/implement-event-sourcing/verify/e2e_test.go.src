@@ -1,0 +1,243 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func doRequest(t *testing.T, ts *httptest.Server, method, path, body string) *http.Response {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body != "" {
+		req, err = http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req, err = http.NewRequest(method, ts.URL+path, nil)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("create_generates_event", func(t *testing.T) {
+		resp := doRequest(t, ts, "POST", "/todos", `{"title":"event-test","done":false}`)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create: expected 201, got %d", resp.StatusCode)
+		}
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+
+		// Check events endpoint
+		evResp := doRequest(t, ts, "GET", "/events", "")
+		defer evResp.Body.Close()
+		if evResp.StatusCode != http.StatusOK {
+			t.Fatalf("events: expected 200, got %d", evResp.StatusCode)
+		}
+		var events []map[string]any
+		json.NewDecoder(evResp.Body).Decode(&events)
+		if len(events) == 0 {
+			t.Fatal("events should not be empty after create")
+		}
+		lastEvent := events[len(events)-1]
+		if lastEvent["type"] != "TodoCreated" {
+			t.Fatalf("last event type should be TodoCreated, got %v", lastEvent["type"])
+		}
+	})
+
+	t.Run("update_generates_event", func(t *testing.T) {
+		// Create first
+		resp := doRequest(t, ts, "POST", "/todos", `{"title":"to-update","done":false}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		// Update
+		resp2 := doRequest(t, ts, "PUT", fmt.Sprintf("/todos/%d", id), `{"title":"updated","done":true}`)
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("update: expected 200, got %d", resp2.StatusCode)
+		}
+
+		// Check events for this aggregate
+		evResp := doRequest(t, ts, "GET", fmt.Sprintf("/events?aggregate_id=%d", id), "")
+		defer evResp.Body.Close()
+		var events []map[string]any
+		json.NewDecoder(evResp.Body).Decode(&events)
+		if len(events) < 2 {
+			t.Fatalf("expected at least 2 events (create+update), got %d", len(events))
+		}
+		found := false
+		for _, ev := range events {
+			if ev["type"] == "TodoUpdated" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("should have TodoUpdated event")
+		}
+	})
+
+	t.Run("delete_generates_event", func(t *testing.T) {
+		resp := doRequest(t, ts, "POST", "/todos", `{"title":"to-delete","done":false}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		resp2 := doRequest(t, ts, "DELETE", fmt.Sprintf("/todos/%d", id), "")
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete: expected 204, got %d", resp2.StatusCode)
+		}
+
+		evResp := doRequest(t, ts, "GET", fmt.Sprintf("/events?aggregate_id=%d", id), "")
+		defer evResp.Body.Close()
+		var events []map[string]any
+		json.NewDecoder(evResp.Body).Decode(&events)
+		found := false
+		for _, ev := range events {
+			if ev["type"] == "TodoDeleted" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("should have TodoDeleted event")
+		}
+	})
+
+	t.Run("events_have_required_fields", func(t *testing.T) {
+		evResp := doRequest(t, ts, "GET", "/events", "")
+		defer evResp.Body.Close()
+		var events []map[string]any
+		json.NewDecoder(evResp.Body).Decode(&events)
+		if len(events) == 0 {
+			t.Fatal("no events")
+		}
+		ev := events[0]
+		for _, field := range []string{"id", "type", "aggregate_id", "data", "timestamp", "version"} {
+			if _, ok := ev[field]; !ok {
+				t.Fatalf("event missing field: %s", field)
+			}
+		}
+	})
+
+	t.Run("events_are_versioned", func(t *testing.T) {
+		resp := doRequest(t, ts, "POST", "/todos", `{"title":"versioned","done":false}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		// Update twice
+		doRequest(t, ts, "PUT", fmt.Sprintf("/todos/%d", id), `{"title":"v2","done":false}`)
+		doRequest(t, ts, "PUT", fmt.Sprintf("/todos/%d", id), `{"title":"v3","done":true}`)
+
+		evResp := doRequest(t, ts, "GET", fmt.Sprintf("/events?aggregate_id=%d", id), "")
+		defer evResp.Body.Close()
+		var events []map[string]any
+		json.NewDecoder(evResp.Body).Decode(&events)
+		if len(events) < 3 {
+			t.Fatalf("expected 3+ events, got %d", len(events))
+		}
+		// Versions should be sequential
+		for i, ev := range events {
+			v := int(ev["version"].(float64))
+			if v != i+1 {
+				t.Fatalf("event %d: expected version %d, got %d", i, i+1, v)
+			}
+		}
+	})
+
+	t.Run("crud_still_works", func(t *testing.T) {
+		// Create
+		resp := doRequest(t, ts, "POST", "/todos", `{"title":"compat","done":false}`)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create: expected 201, got %d", resp.StatusCode)
+		}
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		// Read
+		resp2 := doRequest(t, ts, "GET", fmt.Sprintf("/todos/%d", id), "")
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("get: expected 200, got %d", resp2.StatusCode)
+		}
+		var todo map[string]any
+		json.NewDecoder(resp2.Body).Decode(&todo)
+		if todo["title"] != "compat" {
+			t.Fatalf("get: wrong title %v", todo["title"])
+		}
+
+		// Update
+		resp3 := doRequest(t, ts, "PUT", fmt.Sprintf("/todos/%d", id), `{"title":"updated","done":true}`)
+		defer resp3.Body.Close()
+		if resp3.StatusCode != http.StatusOK {
+			t.Fatalf("update: expected 200, got %d", resp3.StatusCode)
+		}
+
+		// Verify update
+		resp4 := doRequest(t, ts, "GET", fmt.Sprintf("/todos/%d", id), "")
+		defer resp4.Body.Close()
+		var updated map[string]any
+		json.NewDecoder(resp4.Body).Decode(&updated)
+		if updated["title"] != "updated" {
+			t.Fatalf("after update: wrong title %v", updated["title"])
+		}
+		if updated["done"] != true {
+			t.Fatalf("after update: done should be true")
+		}
+
+		// Delete
+		resp5 := doRequest(t, ts, "DELETE", fmt.Sprintf("/todos/%d", id), "")
+		defer resp5.Body.Close()
+		if resp5.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete: expected 204, got %d", resp5.StatusCode)
+		}
+
+		// Verify deleted
+		resp6 := doRequest(t, ts, "GET", fmt.Sprintf("/todos/%d", id), "")
+		defer resp6.Body.Close()
+		if resp6.StatusCode != http.StatusNotFound {
+			t.Fatalf("after delete: expected 404, got %d", resp6.StatusCode)
+		}
+	})
+
+	t.Run("get_all_events", func(t *testing.T) {
+		evResp := doRequest(t, ts, "GET", "/events", "")
+		defer evResp.Body.Close()
+		var events []map[string]any
+		json.NewDecoder(evResp.Body).Decode(&events)
+		if len(events) < 5 {
+			t.Fatalf("expected many events from all operations, got %d", len(events))
+		}
+	})
+
+	t.Run("events_immutable_no_delete", func(t *testing.T) {
+		resp := doRequest(t, ts, "DELETE", "/events", "")
+		defer resp.Body.Close()
+		// Should either 404 or 405
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+			t.Fatal("events should not be deletable")
+		}
+	})
+}

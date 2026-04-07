@@ -1,0 +1,27 @@
+id: "tier2/add-rate-limiter"
+name: "实现令牌桶限速器"
+tier: 2
+type: "concurrency"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func NewRateLimiter(rate float64, burst int) *RateLimiter"
+
+verification_targets:
+  - id: VT-RL-01
+    category: concurrency
+    name: "缺少限速"
+    severity: high
+    description: "需要令牌桶限速器"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现令牌桶 RateLimiter"
+
+code_smells:
+  - "无法控制请求速率"
+
+metadata:
+  files_to_modify: ["ratelimiter.go"]
+  tags: ["feature", "concurrency", "rate-limiting"]

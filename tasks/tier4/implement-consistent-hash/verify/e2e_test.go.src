@@ -1,0 +1,227 @@
+package hashring
+
+import (
+	"fmt"
+	"math"
+	"sync"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("basic_routing", func(t *testing.T) {
+		ring := NewHashRing(100)
+		ring.AddNode("node-a")
+		ring.AddNode("node-b")
+		ring.AddNode("node-c")
+
+		node := ring.GetNode("my-key")
+		if node == "" {
+			t.Fatal("GetNode should return a node")
+		}
+
+		// Same key should always route to same node
+		for i := 0; i < 100; i++ {
+			n := ring.GetNode("my-key")
+			if n != node {
+				t.Fatalf("inconsistent routing: expected %s, got %s", node, n)
+			}
+		}
+	})
+
+	t.Run("empty_ring", func(t *testing.T) {
+		ring := NewHashRing(10)
+		node := ring.GetNode("key")
+		if node != "" {
+			t.Fatalf("empty ring should return empty string, got %s", node)
+		}
+	})
+
+	t.Run("single_node", func(t *testing.T) {
+		ring := NewHashRing(10)
+		ring.AddNode("only")
+		for i := 0; i < 100; i++ {
+			node := ring.GetNode(fmt.Sprintf("key-%d", i))
+			if node != "only" {
+				t.Fatalf("single node ring: expected 'only', got %s", node)
+			}
+		}
+	})
+
+	t.Run("add_node_minimal_migration", func(t *testing.T) {
+		ring := NewHashRing(150)
+		ring.AddNode("a")
+		ring.AddNode("b")
+		ring.AddNode("c")
+
+		// Record key assignments
+		n := 10000
+		before := make(map[string]string, n)
+		for i := 0; i < n; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			before[key] = ring.GetNode(key)
+		}
+
+		// Add a new node
+		ring.AddNode("d")
+
+		// Count how many keys changed
+		changed := 0
+		for i := 0; i < n; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			after := ring.GetNode(key)
+			if after != before[key] {
+				changed++
+			}
+		}
+
+		// With 4 nodes, ~25% should migrate (ideal). Allow up to 40%.
+		maxChanged := int(float64(n) * 0.40)
+		if changed > maxChanged {
+			t.Fatalf("too many keys migrated after adding node: %d/%d (%.1f%%)", changed, n, float64(changed)/float64(n)*100)
+		}
+	})
+
+	t.Run("remove_node_minimal_migration", func(t *testing.T) {
+		ring := NewHashRing(150)
+		ring.AddNode("a")
+		ring.AddNode("b")
+		ring.AddNode("c")
+		ring.AddNode("d")
+
+		n := 10000
+		before := make(map[string]string, n)
+		for i := 0; i < n; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			before[key] = ring.GetNode(key)
+		}
+
+		ring.RemoveNode("c")
+
+		changed := 0
+		for i := 0; i < n; i++ {
+			key := fmt.Sprintf("key-%d", i)
+			after := ring.GetNode(key)
+			if after != before[key] {
+				changed++
+			}
+		}
+
+		// Keys previously on "c" move, others stay. Should be roughly 25%.
+		maxChanged := int(float64(n) * 0.40)
+		if changed > maxChanged {
+			t.Fatalf("too many keys migrated after removing node: %d/%d (%.1f%%)", changed, n, float64(changed)/float64(n)*100)
+		}
+	})
+
+	t.Run("distribution_uniformity", func(t *testing.T) {
+		ring := NewHashRing(200)
+		nodes := []string{"node-1", "node-2", "node-3", "node-4"}
+		for _, n := range nodes {
+			ring.AddNode(n)
+		}
+
+		counts := make(map[string]int)
+		n := 10000
+		for i := 0; i < n; i++ {
+			node := ring.GetNode(fmt.Sprintf("key-%d", i))
+			counts[node]++
+		}
+
+		// Each node should get roughly 25%. Allow 15-35%.
+		expected := float64(n) / float64(len(nodes))
+		for node, count := range counts {
+			ratio := float64(count) / expected
+			if math.Abs(ratio-1.0) > 0.4 {
+				t.Fatalf("node %s: %d keys (%.1f%%) — too far from expected %.0f",
+					node, count, float64(count)/float64(n)*100, expected)
+			}
+		}
+	})
+
+	t.Run("get_nodes_multiple_replicas", func(t *testing.T) {
+		ring := NewHashRing(100)
+		ring.AddNode("a")
+		ring.AddNode("b")
+		ring.AddNode("c")
+
+		nodes := ring.GetNodes("my-key", 2)
+		if len(nodes) != 2 {
+			t.Fatalf("expected 2 nodes, got %d", len(nodes))
+		}
+		if nodes[0] == nodes[1] {
+			t.Fatalf("replicas should be on different physical nodes, got %v", nodes)
+		}
+	})
+
+	t.Run("get_nodes_more_than_available", func(t *testing.T) {
+		ring := NewHashRing(100)
+		ring.AddNode("a")
+		ring.AddNode("b")
+
+		nodes := ring.GetNodes("key", 5)
+		if len(nodes) != 2 {
+			t.Fatalf("should return all 2 nodes when requesting 5, got %d", len(nodes))
+		}
+	})
+
+	t.Run("get_nodes_empty_ring", func(t *testing.T) {
+		ring := NewHashRing(100)
+		nodes := ring.GetNodes("key", 3)
+		if len(nodes) != 0 {
+			t.Fatalf("empty ring should return no nodes, got %d", len(nodes))
+		}
+	})
+
+	t.Run("node_count", func(t *testing.T) {
+		ring := NewHashRing(50)
+		ring.AddNode("a")
+		ring.AddNode("b")
+		ring.AddNode("c")
+		if ring.NodeCount() != 3 {
+			t.Fatalf("expected 3 nodes, got %d", ring.NodeCount())
+		}
+
+		ring.RemoveNode("b")
+		if ring.NodeCount() != 2 {
+			t.Fatalf("expected 2 nodes after remove, got %d", ring.NodeCount())
+		}
+	})
+
+	t.Run("add_duplicate_node", func(t *testing.T) {
+		ring := NewHashRing(50)
+		ring.AddNode("a")
+		ring.AddNode("a") // duplicate
+		if ring.NodeCount() != 1 {
+			t.Fatalf("duplicate add should not increase count, got %d", ring.NodeCount())
+		}
+	})
+
+	t.Run("remove_nonexistent_node", func(t *testing.T) {
+		ring := NewHashRing(50)
+		ring.AddNode("a")
+		ring.RemoveNode("b") // doesn't exist
+		if ring.NodeCount() != 1 {
+			t.Fatalf("removing nonexistent should not change count, got %d", ring.NodeCount())
+		}
+	})
+
+	t.Run("concurrent_access", func(t *testing.T) {
+		ring := NewHashRing(100)
+		ring.AddNode("a")
+		ring.AddNode("b")
+
+		var wg sync.WaitGroup
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				if i%3 == 0 {
+					ring.AddNode(fmt.Sprintf("node-%d", i))
+				} else {
+					ring.GetNode(fmt.Sprintf("key-%d", i))
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
+}

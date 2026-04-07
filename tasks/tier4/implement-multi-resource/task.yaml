@@ -1,0 +1,34 @@
+id: "tier4/implement-multi-resource"
+name: "实现多资源协调器（A->B->C 依赖链）"
+tier: 4
+type: "reconciler"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type MultiReconciler struct"
+  - "type ResourceGraph struct"
+  - "func NewMultiReconciler(store *Store, graph *ResourceGraph) *MultiReconciler"
+  - "func (r *MultiReconciler) Reconcile(name string) Result"
+
+verification_targets:
+  - id: VT-MULTI-01
+    category: architecture
+    name: "单资源 Reconciler"
+    severity: high
+    description: "当前只支持单资源，需要扩展为 A→B→C 依赖链协调器"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 ResourceGraph 定义依赖关系"
+  - "实现 MultiReconciler 按依赖顺序 reconcile"
+  - "实现级联状态传播"
+
+code_smells:
+  - "Reconciler 只处理单一资源类型"
+  - "没有跨资源依赖管理"
+  - "下游资源变化不会触发上游重新 reconcile"
+
+metadata:
+  files_to_modify: ["multi.go", "graph.go", "types.go", "store.go"]
+  tags: ["feature", "reconciler", "multi-resource", "dependency"]

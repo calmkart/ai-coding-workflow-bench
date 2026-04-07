@@ -1,0 +1,76 @@
+package strkit
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("merge_does_not_modify_original_single_map", func(t *testing.T) {
+		original := map[string]string{"key": "original"}
+		merged := MergeMaps(original)
+
+		// Modify merged
+		merged["key"] = "modified"
+		merged["new"] = "added"
+
+		// Original should be unchanged
+		if original["key"] != "original" {
+			t.Fatalf("original map was modified: key=%s, want original", original["key"])
+		}
+		if _, ok := original["new"]; ok {
+			t.Fatal("original map has new key that should not exist")
+		}
+	})
+
+	t.Run("merge_does_not_modify_original_multi_map", func(t *testing.T) {
+		m1 := map[string]string{"a": "1", "b": "2"}
+		m2 := map[string]string{"c": "3"}
+		merged := MergeMaps(m1, m2)
+
+		// Modify merged
+		merged["a"] = "changed"
+
+		// Original should be unchanged
+		if m1["a"] != "1" {
+			t.Fatalf("m1 was modified: a=%s, want 1", m1["a"])
+		}
+	})
+
+	t.Run("later_map_overrides_earlier", func(t *testing.T) {
+		m1 := map[string]string{"a": "1"}
+		m2 := map[string]string{"a": "2"}
+		got := MergeMaps(m1, m2)
+		if got["a"] != "2" {
+			t.Fatalf("expected a=2, got %s", got["a"])
+		}
+	})
+
+	t.Run("empty_input_returns_empty_map", func(t *testing.T) {
+		got := MergeMaps()
+		if got == nil {
+			t.Fatal("expected non-nil empty map")
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty map, got %v", got)
+		}
+	})
+
+	t.Run("nil_map_skipped", func(t *testing.T) {
+		m1 := map[string]string{"a": "1"}
+		got := MergeMaps(m1, nil)
+		if got["a"] != "1" {
+			t.Fatalf("expected a=1, got %s", got["a"])
+		}
+	})
+
+	t.Run("all_keys_present", func(t *testing.T) {
+		m1 := map[string]string{"a": "1"}
+		m2 := map[string]string{"b": "2"}
+		m3 := map[string]string{"c": "3"}
+		got := MergeMaps(m1, m2, m3)
+		if len(got) != 3 {
+			t.Fatalf("expected 3 keys, got %d: %v", len(got), got)
+		}
+		if got["a"] != "1" || got["b"] != "2" || got["c"] != "3" {
+			t.Fatalf("unexpected values: %v", got)
+		}
+	})
+}

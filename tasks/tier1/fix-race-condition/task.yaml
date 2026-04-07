@@ -1,0 +1,29 @@
+id: "tier1/fix-race-condition"
+name: "修复计数器竞态条件"
+tier: 1
+type: "concurrency"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func NewCounter() *Counter"
+  - "func (c *Counter) Inc()"
+  - "func (c *Counter) Get() int64"
+
+verification_targets:
+  - id: VT-RACE-01
+    category: concurrency
+    name: "数据竞态"
+    severity: critical
+    description: "Counter 的 Inc/Get 无锁保护导致竞态条件"
+    detection: "go test -race"
+
+refactoring_targets:
+  - "添加 sync.Mutex 或 atomic 保护 Counter"
+
+code_smells:
+  - "Counter 的 value 字段无并发保护"
+
+metadata:
+  files_to_modify: ["counter.go"]
+  tags: ["bugfix", "race-condition"]

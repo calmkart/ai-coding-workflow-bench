@@ -1,0 +1,234 @@
+package mapreduce
+
+import (
+	"context"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("word_count", func(t *testing.T) {
+		mapper := MapperFunc[string, string, int](func(line string) []KeyValue[string, int] {
+			words := strings.Fields(line)
+			result := make([]KeyValue[string, int], len(words))
+			for i, w := range words {
+				result[i] = KeyValue[string, int]{Key: strings.ToLower(w), Value: 1}
+			}
+			return result
+		})
+
+		reducer := ReducerFunc[string, int, int](func(key string, values []int) int {
+			sum := 0
+			for _, v := range values {
+				sum += v
+			}
+			return sum
+		})
+
+		job := NewJob[string, string, int, int](mapper, reducer, 4)
+		input := []string{
+			"hello world hello",
+			"world foo bar",
+			"hello bar baz",
+		}
+
+		result, err := job.Run(context.Background(), input)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if result["hello"] != 3 {
+			t.Fatalf("hello: expected 3, got %d", result["hello"])
+		}
+		if result["world"] != 2 {
+			t.Fatalf("world: expected 2, got %d", result["world"])
+		}
+		if result["bar"] != 2 {
+			t.Fatalf("bar: expected 2, got %d", result["bar"])
+		}
+		if result["foo"] != 1 {
+			t.Fatalf("foo: expected 1, got %d", result["foo"])
+		}
+		if result["baz"] != 1 {
+			t.Fatalf("baz: expected 1, got %d", result["baz"])
+		}
+	})
+
+	t.Run("empty_input", func(t *testing.T) {
+		mapper := MapperFunc[string, string, int](func(s string) []KeyValue[string, int] {
+			return nil
+		})
+		reducer := ReducerFunc[string, int, int](func(k string, vs []int) int { return 0 })
+
+		job := NewJob[string, string, int, int](mapper, reducer, 4)
+		result, err := job.Run(context.Background(), []string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != 0 {
+			t.Fatalf("empty input should produce empty result, got %d", len(result))
+		}
+	})
+
+	t.Run("parallel_map_execution", func(t *testing.T) {
+		var mapCalls atomic.Int32
+
+		mapper := MapperFunc[int, int, int](func(n int) []KeyValue[int, int] {
+			mapCalls.Add(1)
+			time.Sleep(10 * time.Millisecond) // simulate work
+			return []KeyValue[int, int]{{Key: n % 3, Value: n}}
+		})
+
+		reducer := ReducerFunc[int, int, int](func(k int, vs []int) int {
+			sum := 0
+			for _, v := range vs {
+				sum += v
+			}
+			return sum
+		})
+
+		job := NewJob[int, int, int, int](mapper, reducer, 4)
+		input := make([]int, 20)
+		for i := range input {
+			input[i] = i
+		}
+
+		start := time.Now()
+		result, err := job.Run(context.Background(), input)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != 3 { // keys 0, 1, 2
+			t.Fatalf("expected 3 keys, got %d", len(result))
+		}
+		if mapCalls.Load() != 20 {
+			t.Fatalf("expected 20 map calls, got %d", mapCalls.Load())
+		}
+		// With 4 workers and 20 items at 10ms each, should take ~50ms (not 200ms)
+		if elapsed > 150*time.Millisecond {
+			t.Fatalf("parallel map should be faster, took %v", elapsed)
+		}
+	})
+
+	t.Run("large_dataset", func(t *testing.T) {
+		mapper := MapperFunc[int, int, int](func(n int) []KeyValue[int, int] {
+			return []KeyValue[int, int]{{Key: n % 100, Value: 1}}
+		})
+		reducer := ReducerFunc[int, int, int](func(k int, vs []int) int {
+			return len(vs)
+		})
+
+		job := NewJob[int, int, int, int](mapper, reducer, 8)
+		input := make([]int, 10000)
+		for i := range input {
+			input[i] = i
+		}
+
+		result, err := job.Run(context.Background(), input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != 100 {
+			t.Fatalf("expected 100 keys, got %d", len(result))
+		}
+		// Each bucket should have 100 items (10000 / 100)
+		for k, v := range result {
+			if v != 100 {
+				t.Fatalf("key %d: expected 100, got %d", k, v)
+			}
+		}
+	})
+
+	t.Run("context_cancellation", func(t *testing.T) {
+		mapper := MapperFunc[int, int, int](func(n int) []KeyValue[int, int] {
+			time.Sleep(1 * time.Second)
+			return []KeyValue[int, int]{{Key: 0, Value: n}}
+		})
+		reducer := ReducerFunc[int, int, int](func(k int, vs []int) int { return 0 })
+
+		job := NewJob[int, int, int, int](mapper, reducer, 2)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		_, err := job.Run(ctx, []int{1, 2, 3, 4, 5})
+		if err == nil {
+			// Some implementations might return partial results without error
+			// That's acceptable too
+		}
+	})
+
+	t.Run("map_emits_multiple_pairs", func(t *testing.T) {
+		// Each input emits pairs for each character
+		mapper := MapperFunc[string, rune, int](func(s string) []KeyValue[rune, int] {
+			result := make([]KeyValue[rune, int], len(s))
+			for i, c := range s {
+				result[i] = KeyValue[rune, int]{Key: c, Value: 1}
+			}
+			return result
+		})
+		reducer := ReducerFunc[rune, int, int](func(k rune, vs []int) int {
+			return len(vs)
+		})
+
+		job := NewJob[string, rune, int, int](mapper, reducer, 2)
+		result, err := job.Run(context.Background(), []string{"aab", "abc"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result['a'] != 3 {
+			t.Fatalf("'a': expected 3, got %d", result['a'])
+		}
+		if result['b'] != 2 {
+			t.Fatalf("'b': expected 2, got %d", result['b'])
+		}
+	})
+
+	t.Run("reducer_receives_all_values", func(t *testing.T) {
+		mapper := MapperFunc[int, string, int](func(n int) []KeyValue[string, int] {
+			return []KeyValue[string, int]{{Key: "all", Value: n}}
+		})
+
+		var reducedValues []int
+		reducer := ReducerFunc[string, int, int](func(k string, vs []int) int {
+			reducedValues = vs
+			sum := 0
+			for _, v := range vs {
+				sum += v
+			}
+			return sum
+		})
+
+		job := NewJob[int, string, int, int](mapper, reducer, 4)
+		result, err := job.Run(context.Background(), []int{1, 2, 3, 4, 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result["all"] != 15 {
+			t.Fatalf("sum should be 15, got %d", result["all"])
+		}
+		if len(reducedValues) != 5 {
+			t.Fatalf("reducer should receive 5 values, got %d", len(reducedValues))
+		}
+	})
+
+	t.Run("nil_input", func(t *testing.T) {
+		mapper := MapperFunc[int, int, int](func(n int) []KeyValue[int, int] {
+			return nil
+		})
+		reducer := ReducerFunc[int, int, int](func(k int, vs []int) int { return 0 })
+
+		job := NewJob[int, int, int, int](mapper, reducer, 2)
+		result, err := job.Run(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != 0 {
+			t.Fatalf("nil input should produce empty result")
+		}
+	})
+}

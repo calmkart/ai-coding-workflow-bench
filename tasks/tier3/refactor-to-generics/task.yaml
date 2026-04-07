@@ -1,0 +1,32 @@
+id: "tier3/refactor-to-generics"
+name: "将 interface{} 重构为泛型"
+tier: 3
+type: "library"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "func Map[T, U any](slice []T, fn func(T) U) []U"
+  - "func Filter[T any](slice []T, fn func(T) bool) []T"
+  - "func Reduce[T, U any](slice []T, init U, fn func(U, T) U) U"
+
+verification_targets:
+  - id: VT-GEN-01
+    category: design
+    name: "interface{} 类型不安全"
+    severity: medium
+    description: "集合工具函数使用 interface{} + 类型断言，需要重构为泛型"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "将 interface{} 集合工具函数重构为泛型版本"
+  - "消除所有运行时类型断言"
+
+code_smells:
+  - "大量 interface{} 参数"
+  - "运行时 type assertion 导致 panic"
+  - "无编译期类型检查"
+
+metadata:
+  files_to_modify: ["collections.go"]
+  tags: ["refactoring", "generics", "type-safety"]

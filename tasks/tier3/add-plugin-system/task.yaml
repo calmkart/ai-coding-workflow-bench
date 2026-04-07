@@ -1,0 +1,29 @@
+id: "tier3/add-plugin-system"
+name: "添加 JSON 配置文件插件系统"
+tier: 3
+type: "cli"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "CLI: taskcli --plugins-dir <dir>"
+
+verification_targets:
+  - id: VT-PLUGIN-01
+    category: feature
+    name: "硬编码命令"
+    severity: medium
+    description: "命令硬编码，需要从 JSON 配置文件加载命令定义"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "从 JSON 配置文件加载命令定义"
+  - "支持自定义命令（名称、描述、执行模板）"
+
+code_smells:
+  - "所有命令硬编码在源码中"
+  - "添加新命令需要修改源码"
+
+metadata:
+  files_to_modify: ["main.go"]
+  tags: ["feature", "plugin", "extensibility"]

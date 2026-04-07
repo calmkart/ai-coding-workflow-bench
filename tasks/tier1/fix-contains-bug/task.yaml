@@ -1,0 +1,27 @@
+id: "tier1/fix-contains-bug"
+name: "修复 ContainsAny 空候选列表 bug"
+tier: 1
+type: "library"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func ContainsAny(s string, candidates []string) bool"
+
+verification_targets:
+  - id: VT-LOGIC-01
+    category: correctness
+    name: "空 candidates 返回 true"
+    severity: high
+    description: "ContainsAny 在 candidates 为空时错误返回 true"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 ContainsAny 空 candidates 时返回 false"
+
+code_smells:
+  - "ContainsAny 循环逻辑错误，空列表时跳过循环直接返回 true"
+
+metadata:
+  files_to_modify: ["strkit.go"]
+  tags: ["bugfix", "edge-case"]

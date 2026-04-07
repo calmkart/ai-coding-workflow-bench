@@ -1,0 +1,28 @@
+id: "tier2/fix-infinite-loop"
+name: "修复无限 reconcile 循环"
+tier: 2
+type: "reconciler"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-LOOP-01
+    category: correctness
+    name: "无限循环"
+    severity: critical
+    description: "Reconcile 返回 Requeue:true 无退避，导致 CPU 空转"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 backoff 退避策略防止无限快速循环"
+
+code_smells:
+  - "Requeue:true 没有延迟"
+  - "错误时立即重试无退避"
+
+metadata:
+  files_to_modify: ["reconciler.go"]
+  tags: ["bugfix", "reconciler", "backoff"]

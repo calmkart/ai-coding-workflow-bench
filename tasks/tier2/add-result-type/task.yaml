@@ -1,0 +1,29 @@
+id: "tier2/add-result-type"
+name: "实现泛型 Result 类型"
+tier: 2
+type: "library"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "type Result[T any] struct { Value T; Err error }"
+  - "func Ok[T any](v T) Result[T]"
+  - "func Fail[T any](err error) Result[T]"
+
+verification_targets:
+  - id: VT-RES-01
+    category: design
+    name: "缺少 Result 类型"
+    severity: low
+    description: "没有统一的结果类型"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 Result[T] 泛型类型（类似 Rust）"
+
+code_smells:
+  - "返回多值 (T, error) 时缺少链式操作"
+
+metadata:
+  files_to_modify: ["result.go"]
+  tags: ["feature", "generics", "result-type"]

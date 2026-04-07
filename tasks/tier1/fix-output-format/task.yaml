@@ -1,0 +1,27 @@
+id: "tier1/fix-output-format"
+name: "修复列表输出对齐"
+tier: 1
+type: "cli"
+language: "go"
+estimated_minutes: 5
+
+api_contract:
+  - "func formatTasks(tasks []Task, w io.Writer)"
+
+verification_targets:
+  - id: VT-FMT-01
+    category: formatting
+    name: "列输出不对齐"
+    severity: medium
+    description: "list 输出使用 tab 但没有 tabwriter 导致不对齐"
+    detection: "e2e test case"
+
+refactoring_targets:
+  - "修复 formatTasks 使用 tabwriter 对齐列输出"
+
+code_smells:
+  - "使用原始 \\t 拼接输出，不同长度的字段导致列不对齐"
+
+metadata:
+  files_to_modify: ["format.go"]
+  tags: ["bugfix", "formatting"]

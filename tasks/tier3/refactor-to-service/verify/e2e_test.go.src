@@ -1,0 +1,185 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func seedTodosE2E(t *testing.T, baseURL string, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		body := fmt.Sprintf(`{"title":"todo-%d"}`, i+1)
+		resp, err := http.Post(baseURL+"/todos", "application/json",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("seed todo %d: expected 201, got %d", i+1, resp.StatusCode)
+		}
+	}
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("create_todo", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"buy milk"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+		if resp.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("expected application/json content type")
+		}
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "buy milk" {
+			t.Fatalf("expected title 'buy milk', got %v", todo["title"])
+		}
+	})
+
+	t.Run("get_todo", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "buy milk" {
+			t.Fatalf("expected title 'buy milk', got %v", todo["title"])
+		}
+	})
+
+	t.Run("get_not_found", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos/999")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("list_with_pagination", func(t *testing.T) {
+		mux2 := setupRouter()
+		ts2 := httptest.NewServer(mux2)
+		defer ts2.Close()
+
+		seedTodosE2E(t, ts2.URL, 15)
+
+		resp, err := http.Get(ts2.URL + "/todos?page=1&page_size=10")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+
+		items, ok := body["items"].([]any)
+		if !ok {
+			t.Fatalf("expected items array in response")
+		}
+		if len(items) != 10 {
+			t.Fatalf("expected 10 items, got %d", len(items))
+		}
+
+		total, ok := body["total"].(float64)
+		if !ok || int(total) != 15 {
+			t.Fatalf("expected total 15, got %v", body["total"])
+		}
+	})
+
+	t.Run("update_todo", func(t *testing.T) {
+		req, _ := http.NewRequest("PUT", ts.URL+"/todos/1", strings.NewReader(`{"title":"buy eggs","done":true}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "buy eggs" {
+			t.Fatalf("expected title 'buy eggs', got %v", todo["title"])
+		}
+		if todo["done"] != true {
+			t.Fatalf("expected done true, got %v", todo["done"])
+		}
+	})
+
+	t.Run("delete_todo", func(t *testing.T) {
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/1", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected 204, got %d", resp.StatusCode)
+		}
+
+		// Verify deleted
+		resp2, err := http.Get(ts.URL + "/todos/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404 after delete, got %d", resp2.StatusCode)
+		}
+	})
+
+	t.Run("create_validation_empty_title", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":""}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 for empty title, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("health_check", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}

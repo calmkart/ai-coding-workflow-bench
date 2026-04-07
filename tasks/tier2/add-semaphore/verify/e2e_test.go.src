@@ -1,0 +1,91 @@
+package semaphore
+
+import (
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("acquire_release", func(t *testing.T) {
+		s := NewSemaphore(2)
+		s.Acquire()
+		s.Acquire()
+		s.Release()
+		s.Release()
+	})
+
+	t.Run("try_acquire_success", func(t *testing.T) {
+		s := NewSemaphore(1)
+		if !s.TryAcquire() {
+			t.Fatal("expected TryAcquire to succeed")
+		}
+		s.Release()
+	})
+
+	t.Run("try_acquire_fail", func(t *testing.T) {
+		s := NewSemaphore(1)
+		s.Acquire()
+		if s.TryAcquire() {
+			t.Fatal("expected TryAcquire to fail when full")
+		}
+		s.Release()
+	})
+
+	t.Run("limits_concurrency", func(t *testing.T) {
+		s := NewSemaphore(3)
+		var maxConcurrent atomic.Int32
+		var current atomic.Int32
+		var wg sync.WaitGroup
+
+		for i := 0; i < 20; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.Acquire()
+				defer s.Release()
+
+				c := current.Add(1)
+				if c > maxConcurrent.Load() {
+					maxConcurrent.Store(c)
+				}
+				time.Sleep(10 * time.Millisecond)
+				current.Add(-1)
+			}()
+		}
+		wg.Wait()
+
+		if maxConcurrent.Load() > 3 {
+			t.Fatalf("max concurrent exceeded limit: %d > 3", maxConcurrent.Load())
+		}
+	})
+
+	t.Run("acquire_blocks", func(t *testing.T) {
+		s := NewSemaphore(1)
+		s.Acquire()
+
+		done := make(chan bool, 1)
+		go func() {
+			s.Acquire()
+			done <- true
+			s.Release()
+		}()
+
+		select {
+		case <-done:
+			t.Fatal("acquire should block")
+		case <-time.After(50 * time.Millisecond):
+			// Expected - blocked
+		}
+
+		s.Release()
+
+		select {
+		case <-done:
+			// Expected - unblocked after release
+		case <-time.After(time.Second):
+			t.Fatal("acquire should unblock after release")
+		}
+	})
+}

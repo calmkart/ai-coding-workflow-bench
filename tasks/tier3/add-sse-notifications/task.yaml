@@ -1,0 +1,29 @@
+id: "tier3/add-sse-notifications"
+name: "添加 SSE 实时变更通知"
+tier: 3
+type: "http-server"
+language: "go"
+estimated_minutes: 20
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-SSE-01
+    category: feature
+    name: "无实时通知"
+    severity: medium
+    description: "只有 REST 轮询，需要 SSE 端点推送变更通知"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 GET /events SSE 端点，推送 todo 变更事件"
+  - "实现事件广播器，将 CRUD 变更通知所有 SSE 客户端"
+
+code_smells:
+  - "客户端只能轮询获取变更"
+  - "无实时通知机制"
+
+metadata:
+  files_to_modify: ["main.go", "handlers.go"]
+  tags: ["feature", "sse", "realtime"]

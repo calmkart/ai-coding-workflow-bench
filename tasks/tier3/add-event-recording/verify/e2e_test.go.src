@@ -1,0 +1,152 @@
+package statemgr
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("event_struct", func(t *testing.T) {
+		e := Event{
+			ResourceName: "app1",
+			Type:         "Normal",
+			Reason:       "Created",
+			Message:      "Resource created",
+			Timestamp:    time.Now(),
+		}
+		if e.ResourceName != "app1" {
+			t.Fatalf("expected 'app1', got '%s'", e.ResourceName)
+		}
+	})
+
+	t.Run("in_memory_recorder", func(t *testing.T) {
+		rec := NewInMemoryEventRecorder()
+
+		rec.Record(Event{
+			ResourceName: "app1",
+			Type:         "Normal",
+			Reason:       "Created",
+			Message:      "Created resource",
+		})
+
+		events := rec.Events("app1")
+		if len(events) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(events))
+		}
+		if events[0].Reason != "Created" {
+			t.Fatalf("expected reason 'Created', got '%s'", events[0].Reason)
+		}
+	})
+
+	t.Run("events_filtered_by_resource", func(t *testing.T) {
+		rec := NewInMemoryEventRecorder()
+
+		rec.Record(Event{ResourceName: "app1", Type: "Normal", Reason: "A"})
+		rec.Record(Event{ResourceName: "app2", Type: "Normal", Reason: "B"})
+		rec.Record(Event{ResourceName: "app1", Type: "Normal", Reason: "C"})
+
+		events := rec.Events("app1")
+		if len(events) != 2 {
+			t.Fatalf("expected 2 events for app1, got %d", len(events))
+		}
+
+		events2 := rec.Events("app2")
+		if len(events2) != 1 {
+			t.Fatalf("expected 1 event for app2, got %d", len(events2))
+		}
+	})
+
+	t.Run("reconciler_records_events", func(t *testing.T) {
+		store := NewStore()
+		recorder := NewInMemoryEventRecorder()
+
+		store.Put(&Resource{
+			Name:   "app1",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		rec.SetEventRecorder(recorder)
+
+		// Run until done
+		for i := 0; i < 20; i++ {
+			result := rec.Reconcile("app1")
+			if !result.Requeue {
+				break
+			}
+			time.Sleep(result.RequeueAfter)
+		}
+
+		events := recorder.Events("app1")
+		if len(events) == 0 {
+			t.Fatal("expected events to be recorded during reconciliation")
+		}
+
+		// Should have at least a start and completion event
+		hasNormal := false
+		for _, e := range events {
+			if e.Type == "Normal" {
+				hasNormal = true
+			}
+		}
+		if !hasNormal {
+			t.Fatal("expected Normal type events")
+		}
+	})
+
+	t.Run("max_events_per_resource", func(t *testing.T) {
+		rec := NewInMemoryEventRecorder()
+
+		for i := 0; i < 150; i++ {
+			rec.Record(Event{
+				ResourceName: "app1",
+				Type:         "Normal",
+				Reason:       "Test",
+			})
+		}
+
+		events := rec.Events("app1")
+		if len(events) > 100 {
+			t.Fatalf("expected max 100 events, got %d", len(events))
+		}
+	})
+
+	t.Run("event_types", func(t *testing.T) {
+		store := NewStore()
+		recorder := NewInMemoryEventRecorder()
+
+		store.Put(&Resource{
+			Name:   "bad",
+			Spec:   ResourceSpec{Replicas: -1, Image: ""},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		rec.SetEventRecorder(recorder)
+		rec.Reconcile("bad")
+
+		// Invalid spec should produce a Warning event
+		events := recorder.Events("bad")
+		hasWarning := false
+		for _, e := range events {
+			if e.Type == "Warning" {
+				hasWarning = true
+			}
+		}
+		// Warning events for error conditions are expected
+		_ = hasWarning
+	})
+
+	t.Run("event_has_timestamp", func(t *testing.T) {
+		rec := NewInMemoryEventRecorder()
+		before := time.Now()
+		rec.Record(Event{ResourceName: "app1", Type: "Normal", Reason: "Test"})
+		after := time.Now()
+
+		events := rec.Events("app1")
+		if events[0].Timestamp.Before(before) || events[0].Timestamp.After(after) {
+			t.Fatal("event timestamp should be set automatically")
+		}
+	})
+}

@@ -1,0 +1,61 @@
+package strkit
+
+import (
+	"slices"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("nil_slice_no_panic", func(t *testing.T) {
+		got := Dedup(nil)
+		if len(got) != 0 {
+			t.Fatalf("Dedup(nil) should return empty, got %v", got)
+		}
+	})
+
+	t.Run("empty_slice_no_panic", func(t *testing.T) {
+		got := Dedup([]string{})
+		if len(got) != 0 {
+			t.Fatalf("Dedup([]) should return empty, got %v", got)
+		}
+	})
+
+	t.Run("single_element", func(t *testing.T) {
+		got := Dedup([]string{"hello"})
+		if len(got) != 1 || got[0] != "hello" {
+			t.Fatalf("Dedup([hello]) = %v, want [hello]", got)
+		}
+	})
+
+	t.Run("with_duplicates", func(t *testing.T) {
+		got := Dedup([]string{"a", "b", "a", "c", "b", "d"})
+		want := []string{"a", "b", "c", "d"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("Dedup = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no_duplicates", func(t *testing.T) {
+		got := Dedup([]string{"x", "y", "z"})
+		want := []string{"x", "y", "z"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("Dedup = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("all_same", func(t *testing.T) {
+		got := Dedup([]string{"a", "a", "a"})
+		want := []string{"a"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("Dedup = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("preserves_order", func(t *testing.T) {
+		got := Dedup([]string{"c", "a", "b", "a", "c"})
+		want := []string{"c", "a", "b"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("Dedup = %v, want %v (order matters)", got, want)
+		}
+	})
+}

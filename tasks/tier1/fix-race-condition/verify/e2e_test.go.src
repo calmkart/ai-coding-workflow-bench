@@ -1,0 +1,87 @@
+package workerpool
+
+import (
+	"sync"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("concurrent_inc_race_free", func(t *testing.T) {
+		c := NewCounter()
+
+		var wg sync.WaitGroup
+		goroutines := 100
+		incsPerGoroutine := 1000
+
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < incsPerGoroutine; j++ {
+					c.Inc()
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		expected := int64(goroutines * incsPerGoroutine)
+		got := c.Get()
+		if got != expected {
+			t.Fatalf("expected %d, got %d", expected, got)
+		}
+	})
+
+	t.Run("concurrent_inc_and_get_race_free", func(t *testing.T) {
+		c := NewCounter()
+
+		var wg sync.WaitGroup
+
+		// Writers
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					c.Inc()
+				}
+			}()
+		}
+
+		// Readers
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					_ = c.Get()
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		expected := int64(50 * 100)
+		got := c.Get()
+		if got != expected {
+			t.Fatalf("expected %d, got %d", expected, got)
+		}
+	})
+
+	t.Run("sequential_correctness", func(t *testing.T) {
+		c := NewCounter()
+		for i := 0; i < 10; i++ {
+			c.Inc()
+		}
+		if c.Get() != 10 {
+			t.Fatalf("expected 10, got %d", c.Get())
+		}
+	})
+
+	t.Run("initial_value_zero", func(t *testing.T) {
+		c := NewCounter()
+		if c.Get() != 0 {
+			t.Fatalf("expected 0, got %d", c.Get())
+		}
+	})
+}

@@ -1,0 +1,35 @@
+id: "tier4/implement-scheduler"
+name: "实现任务调度器（cron 风格）"
+tier: 4
+type: "concurrency"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type CronExpr struct"
+  - "type Scheduler struct"
+  - "func ParseCron(expr string) (*CronExpr, error)"
+  - "func NewScheduler() *Scheduler"
+  - "func (s *Scheduler) Schedule(name string, cron string, fn func()) (string, error)"
+  - "func (s *Scheduler) Cancel(id string) error"
+  - "func (s *Scheduler) Start(ctx context.Context)"
+
+verification_targets:
+  - id: VT-SCHED-01
+    category: feature
+    name: "无任务调度器"
+    severity: high
+    description: "需要实现 cron 表达式解析和定时执行"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现简化版 cron 表达式解析"
+  - "实现定时任务执行"
+  - "实现任务取消"
+
+code_smells:
+  - "只有空的接口定义"
+
+metadata:
+  files_to_modify: ["scheduler.go", "cron.go"]
+  tags: ["feature", "concurrency", "scheduler", "cron"]

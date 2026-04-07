@@ -1,0 +1,27 @@
+id: "tier2/add-bulk-create"
+name: "添加批量创建端点"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-BULK-01
+    category: feature
+    name: "缺少批量操作"
+    severity: medium
+    description: "只有单个创建，需要 POST /todos/bulk 批量创建"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 POST /todos/bulk 端点，支持一次创建多个 todo"
+
+code_smells:
+  - "创建多个 todo 需要多次 HTTP 请求"
+
+metadata:
+  files_to_modify: ["handlers.go", "main.go"]
+  tags: ["feature", "bulk-operation"]

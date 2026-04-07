@@ -1,0 +1,33 @@
+id: "tier4/implement-workflow-engine"
+name: "实现简单工作流引擎"
+tier: 4
+type: "cli"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type Step struct"
+  - "type Workflow struct"
+  - "func ParseWorkflow(data []byte) (*Workflow, error)"
+  - "func (w *Workflow) Execute(ctx context.Context) (*WorkflowResult, error)"
+  - "type WorkflowResult struct"
+
+verification_targets:
+  - id: VT-WF-01
+    category: feature
+    name: "无工作流引擎"
+    severity: high
+    description: "需要实现简单的工作流定义和执行"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现工作流 YAML 解析"
+  - "实现步骤顺序/并行执行"
+  - "实现结果收集和错误处理"
+
+code_smells:
+  - "只有空的结构定义"
+
+metadata:
+  files_to_modify: ["workflow.go", "executor.go"]
+  tags: ["feature", "workflow", "yaml", "concurrent"]

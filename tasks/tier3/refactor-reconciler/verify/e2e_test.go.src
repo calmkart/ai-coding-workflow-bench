@@ -1,0 +1,139 @@
+package statemgr
+
+import (
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("sub_reconciler_interface", func(t *testing.T) {
+		// Verify SubReconciler interface exists
+		var sr SubReconciler
+		_ = sr
+	})
+
+	t.Run("validate_spec_reconciler", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "valid",
+			Spec: ResourceSpec{Replicas: 2, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		vr := &ValidateSpecReconciler{store: store}
+		res, _ := store.Get("valid")
+		result, err := vr.Reconcile(res)
+		if err != nil {
+			t.Fatalf("valid spec should not error: %v", err)
+		}
+		if result.Requeue {
+			t.Fatal("validate should not requeue on success")
+		}
+	})
+
+	t.Run("validate_spec_invalid_replicas", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "invalid",
+			Spec: ResourceSpec{Replicas: -1, Image: "nginx"},
+		})
+
+		vr := &ValidateSpecReconciler{store: store}
+		res, _ := store.Get("invalid")
+		_, err := vr.Reconcile(res)
+		if err == nil {
+			t.Fatal("expected error for negative replicas")
+		}
+	})
+
+	t.Run("validate_spec_missing_image", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "noimg",
+			Spec: ResourceSpec{Replicas: 1, Image: ""},
+		})
+
+		vr := &ValidateSpecReconciler{store: store}
+		res, _ := store.Get("noimg")
+		_, err := vr.Reconcile(res)
+		if err == nil {
+			t.Fatal("expected error for missing image")
+		}
+	})
+
+	t.Run("composite_reconciler", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "test",
+			Spec: ResourceSpec{Replicas: 2, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewCompositeReconciler(store)
+		runner := NewRunner(rec)
+		iterations := runner.RunOnce("test", 20)
+
+		res, _ := store.Get("test")
+		if res.Status.Phase != "Running" {
+			t.Fatalf("expected Running, got %s", res.Status.Phase)
+		}
+		if res.Status.ReadyReplicas != 2 {
+			t.Fatalf("expected 2 ready, got %d", res.Status.ReadyReplicas)
+		}
+		if iterations > 15 {
+			t.Fatalf("too many iterations: %d", iterations)
+		}
+	})
+
+	t.Run("ensure_resources_reconciler", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "ensure",
+			Spec: ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		er := &EnsureResourcesReconciler{store: store}
+		res, _ := store.Get("ensure")
+		result, err := er.Reconcile(res)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Should requeue to continue scaling
+		if !result.Requeue {
+			t.Fatal("expected requeue from ensure resources")
+		}
+	})
+
+	t.Run("update_status_reconciler", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "status",
+			Spec: ResourceSpec{Replicas: 2, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Running", ReadyReplicas: 2},
+		})
+
+		ur := &UpdateStatusReconciler{store: store}
+		res, _ := store.Get("status")
+		result, err := ur.Reconcile(res)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Requeue {
+			t.Fatal("should not requeue when all ready")
+		}
+
+		updated, _ := store.Get("status")
+		if updated.Status.Message != "All replicas ready" {
+			t.Fatalf("expected 'All replicas ready', got '%s'", updated.Status.Message)
+		}
+	})
+
+	t.Run("not_found_no_requeue", func(t *testing.T) {
+		store := NewStore()
+		rec := NewCompositeReconciler(store)
+		result := rec.Reconcile("nonexistent")
+		if result.Requeue {
+			t.Fatal("should not requeue for missing resource")
+		}
+	})
+}

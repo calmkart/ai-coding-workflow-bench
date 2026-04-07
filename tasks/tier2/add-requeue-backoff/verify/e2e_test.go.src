@@ -1,0 +1,120 @@
+package statemgr
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("backoff_type_exists", func(t *testing.T) {
+		b := Backoff{
+			InitialDelay: 100 * time.Millisecond,
+			MaxDelay:     5 * time.Second,
+			Factor:       2.0,
+		}
+		if b.InitialDelay != 100*time.Millisecond {
+			t.Fatalf("expected 100ms, got %v", b.InitialDelay)
+		}
+	})
+
+	t.Run("backoff_increases", func(t *testing.T) {
+		b := Backoff{
+			InitialDelay: 10 * time.Millisecond,
+			MaxDelay:     1 * time.Second,
+			Factor:       2.0,
+		}
+
+		d1 := b.Next()
+		d2 := b.Next()
+		d3 := b.Next()
+
+		if d2 <= d1 {
+			t.Fatalf("expected d2 (%v) > d1 (%v)", d2, d1)
+		}
+		if d3 <= d2 {
+			t.Fatalf("expected d3 (%v) > d2 (%v)", d3, d2)
+		}
+	})
+
+	t.Run("backoff_max_cap", func(t *testing.T) {
+		b := Backoff{
+			InitialDelay: 100 * time.Millisecond,
+			MaxDelay:     500 * time.Millisecond,
+			Factor:       2.0,
+		}
+
+		var last time.Duration
+		for i := 0; i < 20; i++ {
+			last = b.Next()
+		}
+
+		if last > 500*time.Millisecond {
+			t.Fatalf("exceeded max: %v", last)
+		}
+	})
+
+	t.Run("backoff_reset", func(t *testing.T) {
+		b := Backoff{
+			InitialDelay: 10 * time.Millisecond,
+			MaxDelay:     1 * time.Second,
+			Factor:       2.0,
+		}
+
+		b.Next()
+		b.Next()
+		b.Next()
+		b.Reset()
+
+		d := b.Next()
+		if d != 10*time.Millisecond {
+			t.Fatalf("expected 10ms after reset, got %v", d)
+		}
+	})
+
+	t.Run("runner_applies_backoff_on_error", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "backoff-test",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		rec.SetFailUntil("backoff-test", 3)
+
+		runner := NewRunner(rec)
+		_, delays := runner.RunOnce("backoff-test", 10)
+
+		// First few delays should be increasing (backoff on errors)
+		if len(delays) < 3 {
+			t.Fatalf("expected at least 3 delays, got %d", len(delays))
+		}
+
+		// Verify delays increase for the error period
+		for i := 1; i < 3 && i < len(delays); i++ {
+			if delays[i] < delays[i-1] {
+				t.Fatalf("delay[%d]=%v should be >= delay[%d]=%v", i, delays[i], i-1, delays[i-1])
+			}
+		}
+	})
+
+	t.Run("converges_after_failures", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "converge-test",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		rec.SetFailUntil("converge-test", 2)
+
+		runner := NewRunner(rec)
+		runner.RunOnce("converge-test", 20)
+
+		got, _ := store.Get("converge-test")
+		if got.Status.ReadyReplicas != 1 {
+			t.Fatalf("expected 1 ready, got %d", got.Status.ReadyReplicas)
+		}
+	})
+}

@@ -1,0 +1,284 @@
+package raftlog
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("leader_propose", func(t *testing.T) {
+		node := NewRaftNode("leader")
+		node.BecomeLeader(1)
+
+		entry, err := node.Propose("SET x=1")
+		if err != nil {
+			t.Fatalf("propose should succeed: %v", err)
+		}
+		if entry.Index != 1 {
+			t.Fatalf("first entry should be index 1, got %d", entry.Index)
+		}
+		if entry.Term != 1 {
+			t.Fatalf("entry term should be 1, got %d", entry.Term)
+		}
+		if entry.Command != "SET x=1" {
+			t.Fatalf("wrong command: %v", entry.Command)
+		}
+	})
+
+	t.Run("follower_cannot_propose", func(t *testing.T) {
+		node := NewRaftNode("follower")
+		_, err := node.Propose("SET x=1")
+		if err != ErrNotLeader {
+			t.Fatalf("follower propose should return ErrNotLeader, got %v", err)
+		}
+	})
+
+	t.Run("leader_propose_sequential_index", func(t *testing.T) {
+		node := NewRaftNode("leader")
+		node.BecomeLeader(1)
+
+		for i := 1; i <= 5; i++ {
+			entry, err := node.Propose("cmd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.Index != i {
+				t.Fatalf("entry %d: expected index %d, got %d", i, i, entry.Index)
+			}
+		}
+		if node.LastIndex() != 5 {
+			t.Fatalf("expected last index 5, got %d", node.LastIndex())
+		}
+	})
+
+	t.Run("append_entries_basic", func(t *testing.T) {
+		follower := NewRaftNode("follower")
+
+		entries := []LogEntry{
+			{Index: 1, Term: 1, Command: "SET x=1"},
+			{Index: 2, Term: 1, Command: "SET y=2"},
+		}
+
+		ok, term := follower.AppendEntries(entries, 1, 0, 0)
+		if !ok {
+			t.Fatalf("append should succeed, got term=%d", term)
+		}
+		if follower.LastIndex() != 2 {
+			t.Fatalf("expected 2 entries, got %d", follower.LastIndex())
+		}
+	})
+
+	t.Run("append_entries_rejects_old_term", func(t *testing.T) {
+		follower := NewRaftNode("follower")
+		// Set current term to 5
+		follower.AppendEntries(nil, 5, 0, 0)
+
+		// Try append with old term
+		ok, term := follower.AppendEntries(
+			[]LogEntry{{Index: 1, Term: 3, Command: "old"}},
+			3, 0, 0,
+		)
+		if ok {
+			t.Fatal("should reject entries with older term")
+		}
+		if term != 5 {
+			t.Fatalf("should return current term 5, got %d", term)
+		}
+	})
+
+	t.Run("append_entries_rejects_wrong_prev", func(t *testing.T) {
+		follower := NewRaftNode("follower")
+		// Append one entry at term 1
+		follower.AppendEntries(
+			[]LogEntry{{Index: 1, Term: 1, Command: "first"}},
+			1, 0, 0,
+		)
+
+		// Try to append with wrong prevTerm
+		ok, _ := follower.AppendEntries(
+			[]LogEntry{{Index: 2, Term: 2, Command: "second"}},
+			2, 1, 99, // prevTerm 99 doesn't match
+		)
+		if ok {
+			t.Fatal("should reject when prevTerm doesn't match")
+		}
+	})
+
+	t.Run("append_entries_truncates_conflict", func(t *testing.T) {
+		follower := NewRaftNode("follower")
+		// Append entries from term 1
+		follower.AppendEntries(
+			[]LogEntry{
+				{Index: 1, Term: 1, Command: "a"},
+				{Index: 2, Term: 1, Command: "b"},
+				{Index: 3, Term: 1, Command: "c"},
+			},
+			1, 0, 0,
+		)
+
+		// New leader sends conflicting entry at index 2 with term 2
+		ok, _ := follower.AppendEntries(
+			[]LogEntry{{Index: 2, Term: 2, Command: "B"}},
+			2, 1, 1,
+		)
+		if !ok {
+			t.Fatal("should succeed replacing conflicting entries")
+		}
+
+		// Log should now be [1:term1:a, 2:term2:B]
+		if follower.LastIndex() != 2 {
+			t.Fatalf("expected 2 entries after truncation, got %d", follower.LastIndex())
+		}
+
+		entry, _ := follower.GetEntry(2)
+		if entry.Term != 2 || entry.Command != "B" {
+			t.Fatalf("entry 2 should be term=2, cmd=B, got term=%d, cmd=%s", entry.Term, entry.Command)
+		}
+	})
+
+	t.Run("commit_and_apply", func(t *testing.T) {
+		node := NewRaftNode("leader")
+		node.BecomeLeader(1)
+
+		node.Propose("cmd-1")
+		node.Propose("cmd-2")
+		node.Propose("cmd-3")
+
+		// Commit first 2
+		err := node.Commit(2)
+		if err != nil {
+			t.Fatalf("commit should succeed: %v", err)
+		}
+
+		// Apply should return committed but unapplied entries
+		applied := node.Apply()
+		if len(applied) != 2 {
+			t.Fatalf("expected 2 applied entries, got %d", len(applied))
+		}
+		if applied[0].Command != "cmd-1" || applied[1].Command != "cmd-2" {
+			t.Fatalf("wrong applied entries: %v", applied)
+		}
+
+		// Apply again should return nothing
+		applied2 := node.Apply()
+		if len(applied2) != 0 {
+			t.Fatalf("second apply should return 0, got %d", len(applied2))
+		}
+	})
+
+	t.Run("commit_remaining", func(t *testing.T) {
+		node := NewRaftNode("leader")
+		node.BecomeLeader(1)
+
+		node.Propose("a")
+		node.Propose("b")
+		node.Propose("c")
+
+		node.Commit(2)
+		node.Apply()
+
+		node.Commit(3)
+		applied := node.Apply()
+		if len(applied) != 1 {
+			t.Fatalf("expected 1 newly applied entry, got %d", len(applied))
+		}
+		if applied[0].Command != "c" {
+			t.Fatalf("expected command 'c', got %s", applied[0].Command)
+		}
+	})
+
+	t.Run("commit_invalid_index", func(t *testing.T) {
+		node := NewRaftNode("leader")
+		node.BecomeLeader(1)
+		node.Propose("a")
+
+		err := node.Commit(5)
+		if err == nil {
+			t.Fatal("commit beyond log should fail")
+		}
+	})
+
+	t.Run("get_log", func(t *testing.T) {
+		node := NewRaftNode("leader")
+		node.BecomeLeader(1)
+		node.Propose("x")
+		node.Propose("y")
+
+		log := node.GetLog()
+		if len(log) != 2 {
+			t.Fatalf("expected 2 entries, got %d", len(log))
+		}
+	})
+
+	t.Run("get_entry", func(t *testing.T) {
+		node := NewRaftNode("leader")
+		node.BecomeLeader(1)
+		node.Propose("hello")
+
+		entry, ok := node.GetEntry(1)
+		if !ok {
+			t.Fatal("GetEntry(1) should succeed")
+		}
+		if entry.Command != "hello" {
+			t.Fatalf("wrong command: %s", entry.Command)
+		}
+
+		_, ok = node.GetEntry(99)
+		if ok {
+			t.Fatal("GetEntry(99) should fail")
+		}
+	})
+
+	t.Run("term_update_on_append", func(t *testing.T) {
+		follower := NewRaftNode("f1")
+		// Receive entries from leader with term 3
+		follower.AppendEntries(nil, 3, 0, 0)
+		if follower.CurrentTerm() != 3 {
+			t.Fatalf("follower term should update to 3, got %d", follower.CurrentTerm())
+		}
+	})
+
+	t.Run("full_replication_flow", func(t *testing.T) {
+		leader := NewRaftNode("leader")
+		leader.BecomeLeader(1)
+
+		follower1 := NewRaftNode("f1")
+		follower2 := NewRaftNode("f2")
+
+		// Leader proposes 3 entries
+		for i := 0; i < 3; i++ {
+			leader.Propose("cmd")
+		}
+
+		// Replicate to followers
+		log := leader.GetLog()
+		ok1, _ := follower1.AppendEntries(log, 1, 0, 0)
+		ok2, _ := follower2.AppendEntries(log, 1, 0, 0)
+		if !ok1 || !ok2 {
+			t.Fatal("replication should succeed")
+		}
+
+		// Commit and apply on leader
+		leader.Commit(3)
+		applied := leader.Apply()
+		if len(applied) != 3 {
+			t.Fatalf("leader should apply 3, got %d", len(applied))
+		}
+
+		// Followers commit and apply
+		follower1.Commit(3)
+		follower2.Commit(3)
+
+		a1 := follower1.Apply()
+		a2 := follower2.Apply()
+		if len(a1) != 3 || len(a2) != 3 {
+			t.Fatal("followers should apply 3 entries each")
+		}
+	})
+
+	t.Run("empty_append_entries_heartbeat", func(t *testing.T) {
+		follower := NewRaftNode("f1")
+		// Empty append entries (heartbeat)
+		ok, _ := follower.AppendEntries(nil, 1, 0, 0)
+		if !ok {
+			t.Fatal("empty append entries should succeed (heartbeat)")
+		}
+	})
+}

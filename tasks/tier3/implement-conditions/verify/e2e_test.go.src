@@ -1,0 +1,166 @@
+package statemgr
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("condition_struct", func(t *testing.T) {
+		c := Condition{
+			Type:               "Ready",
+			Status:             "True",
+			Reason:             "AllReplicasReady",
+			Message:            "All replicas are ready",
+			LastTransitionTime: time.Now(),
+		}
+		if c.Type != "Ready" {
+			t.Fatalf("expected type 'Ready', got '%s'", c.Type)
+		}
+	})
+
+	t.Run("set_condition", func(t *testing.T) {
+		status := &ResourceStatus{}
+		now := time.Now()
+
+		SetCondition(status, Condition{
+			Type:    "Ready",
+			Status:  "False",
+			Reason:  "NotReady",
+			Message: "Not ready yet",
+		})
+
+		if len(status.Conditions) != 1 {
+			t.Fatalf("expected 1 condition, got %d", len(status.Conditions))
+		}
+		if status.Conditions[0].Type != "Ready" {
+			t.Fatalf("expected Ready, got %s", status.Conditions[0].Type)
+		}
+		if status.Conditions[0].LastTransitionTime.Before(now.Add(-time.Second)) {
+			t.Fatal("LastTransitionTime should be recent")
+		}
+	})
+
+	t.Run("update_condition_same_status", func(t *testing.T) {
+		status := &ResourceStatus{}
+
+		SetCondition(status, Condition{
+			Type:   "Ready",
+			Status: "False",
+			Reason: "NotReady",
+		})
+		firstTime := status.Conditions[0].LastTransitionTime
+
+		time.Sleep(10 * time.Millisecond)
+
+		// Update with same status - LastTransitionTime should NOT change
+		SetCondition(status, Condition{
+			Type:    "Ready",
+			Status:  "False",
+			Reason:  "StillNotReady",
+			Message: "Updated message",
+		})
+
+		if len(status.Conditions) != 1 {
+			t.Fatalf("expected 1 condition, got %d", len(status.Conditions))
+		}
+		if !status.Conditions[0].LastTransitionTime.Equal(firstTime) {
+			t.Fatal("LastTransitionTime should not change when status unchanged")
+		}
+		if status.Conditions[0].Reason != "StillNotReady" {
+			t.Fatalf("Reason should be updated")
+		}
+	})
+
+	t.Run("update_condition_different_status", func(t *testing.T) {
+		status := &ResourceStatus{}
+
+		SetCondition(status, Condition{
+			Type:   "Ready",
+			Status: "False",
+		})
+		firstTime := status.Conditions[0].LastTransitionTime
+
+		time.Sleep(10 * time.Millisecond)
+
+		SetCondition(status, Condition{
+			Type:   "Ready",
+			Status: "True",
+		})
+
+		if status.Conditions[0].LastTransitionTime.Equal(firstTime) {
+			t.Fatal("LastTransitionTime should change when status changes")
+		}
+	})
+
+	t.Run("get_condition", func(t *testing.T) {
+		status := &ResourceStatus{}
+		SetCondition(status, Condition{Type: "Ready", Status: "True"})
+		SetCondition(status, Condition{Type: "Available", Status: "False"})
+
+		c := GetCondition(status, "Ready")
+		if c == nil {
+			t.Fatal("expected to find Ready condition")
+		}
+		if c.Status != "True" {
+			t.Fatalf("expected True, got %s", c.Status)
+		}
+
+		c2 := GetCondition(status, "NonExistent")
+		if c2 != nil {
+			t.Fatal("expected nil for non-existent condition")
+		}
+	})
+
+	t.Run("is_condition_true", func(t *testing.T) {
+		status := &ResourceStatus{}
+		SetCondition(status, Condition{Type: "Ready", Status: "True"})
+		SetCondition(status, Condition{Type: "Available", Status: "False"})
+
+		if !IsConditionTrue(status, "Ready") {
+			t.Fatal("Ready should be true")
+		}
+		if IsConditionTrue(status, "Available") {
+			t.Fatal("Available should be false")
+		}
+		if IsConditionTrue(status, "NonExistent") {
+			t.Fatal("NonExistent should be false")
+		}
+	})
+
+	t.Run("reconciler_uses_conditions", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "test",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+
+		// Run until complete
+		for i := 0; i < 20; i++ {
+			result := rec.Reconcile("test")
+			if !result.Requeue {
+				break
+			}
+			time.Sleep(result.RequeueAfter)
+		}
+
+		res, _ := store.Get("test")
+		if !IsConditionTrue(&res.Status, "Ready") {
+			t.Fatal("expected Ready condition to be True after reconciliation")
+		}
+	})
+
+	t.Run("multiple_conditions", func(t *testing.T) {
+		status := &ResourceStatus{}
+		SetCondition(status, Condition{Type: "Ready", Status: "True"})
+		SetCondition(status, Condition{Type: "Available", Status: "True"})
+		SetCondition(status, Condition{Type: "Progressing", Status: "False"})
+
+		if len(status.Conditions) != 3 {
+			t.Fatalf("expected 3 conditions, got %d", len(status.Conditions))
+		}
+	})
+}

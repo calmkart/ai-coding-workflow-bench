@@ -1,0 +1,27 @@
+id: "tier2/add-list-filtering"
+name: "添加列表过滤"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-FILT-01
+    category: feature
+    name: "缺少过滤"
+    severity: medium
+    description: "GET /todos 只支持分页，不支持按 done 状态过滤"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 ?done=true/false 查询参数过滤"
+
+code_smells:
+  - "listTodos 不支持任何过滤条件"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["feature", "filtering"]

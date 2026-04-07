@@ -1,0 +1,28 @@
+id: "tier2/add-request-validation"
+name: "添加请求体验证"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-VAL-01
+    category: validation
+    name: "缺少输入验证"
+    severity: high
+    description: "POST /todos 接受空 title 等无效输入"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "为 POST /todos 添加请求体验证（title 不能为空）"
+
+code_smells:
+  - "createTodo handler 没有验证 title 是否为空"
+  - "没有限制 title 长度"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["feature", "validation"]

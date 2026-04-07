@@ -1,0 +1,55 @@
+package main
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("default_port_is_8080", func(t *testing.T) {
+		cfg, err := run([]string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Port != 8080 {
+			t.Fatalf("default port: expected 8080, got %d", cfg.Port)
+		}
+	})
+
+	t.Run("explicit_port_3000", func(t *testing.T) {
+		cfg, err := run([]string{"--port", "3000"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Port != 3000 {
+			t.Fatalf("expected port 3000, got %d", cfg.Port)
+		}
+	})
+
+	t.Run("explicit_port_equals_syntax", func(t *testing.T) {
+		cfg, err := run([]string{"--port=9090"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Port != 9090 {
+			t.Fatalf("expected port 9090, got %d", cfg.Port)
+		}
+	})
+
+	t.Run("default_verbose_false", func(t *testing.T) {
+		cfg, err := run([]string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Verbose {
+			t.Fatal("expected verbose=false by default")
+		}
+	})
+
+	t.Run("default_db_path", func(t *testing.T) {
+		cfg, err := run([]string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.DBPath != "tasks.db" {
+			t.Fatalf("expected db=tasks.db, got %s", cfg.DBPath)
+		}
+	})
+}

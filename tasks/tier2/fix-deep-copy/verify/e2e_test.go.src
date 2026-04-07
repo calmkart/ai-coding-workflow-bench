@@ -1,0 +1,85 @@
+package config
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("modify_clone_name_no_affect", func(t *testing.T) {
+		c := NewConfig()
+		clone := c.Clone()
+		clone.Name = "changed"
+
+		if c.Name == "changed" {
+			t.Fatal("modifying clone.Name affected original")
+		}
+	})
+
+	t.Run("modify_clone_tags_no_affect", func(t *testing.T) {
+		c := NewConfig()
+		clone := c.Clone()
+		clone.Tags = append(clone.Tags, "staging")
+
+		if len(c.Tags) != 1 {
+			t.Fatalf("modifying clone.Tags affected original: %v", c.Tags)
+		}
+	})
+
+	t.Run("modify_clone_tags_element_no_affect", func(t *testing.T) {
+		c := NewConfig()
+		clone := c.Clone()
+		clone.Tags[0] = "modified"
+
+		if c.Tags[0] == "modified" {
+			t.Fatal("modifying clone.Tags[0] affected original")
+		}
+	})
+
+	t.Run("modify_clone_settings_no_affect", func(t *testing.T) {
+		c := NewConfig()
+		clone := c.Clone()
+		clone.Settings["new_key"] = "new_value"
+
+		if _, ok := c.Settings["new_key"]; ok {
+			t.Fatal("modifying clone.Settings affected original")
+		}
+	})
+
+	t.Run("modify_clone_database_no_affect", func(t *testing.T) {
+		c := NewConfig()
+		clone := c.Clone()
+		clone.Database.Host = "remote-host"
+
+		if c.Database.Host == "remote-host" {
+			t.Fatal("modifying clone.Database.Host affected original")
+		}
+	})
+
+	t.Run("modify_clone_database_options_no_affect", func(t *testing.T) {
+		c := NewConfig()
+		clone := c.Clone()
+		clone.Database.Options["sslmode"] = "require"
+
+		if c.Database.Options["sslmode"] == "require" {
+			t.Fatal("modifying clone.Database.Options affected original")
+		}
+	})
+
+	t.Run("modify_clone_database_replicas_no_affect", func(t *testing.T) {
+		c := NewConfig()
+		clone := c.Clone()
+		clone.Database.Replicas = append(clone.Database.Replicas, "replica-2")
+
+		if len(c.Database.Replicas) != 1 {
+			t.Fatalf("modifying clone.Database.Replicas affected original: %v", c.Database.Replicas)
+		}
+	})
+
+	t.Run("nil_database_clone", func(t *testing.T) {
+		c := NewConfig()
+		c.Database = nil
+		clone := c.Clone()
+
+		if clone.Database != nil {
+			t.Fatal("expected nil Database in clone")
+		}
+	})
+}

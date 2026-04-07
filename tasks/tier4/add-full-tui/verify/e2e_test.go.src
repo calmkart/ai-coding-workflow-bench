@@ -1,0 +1,290 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("list_selector_render", func(t *testing.T) {
+		list := NewListSelector([]string{"Apple", "Banana", "Cherry"})
+		list.SetFocused(true)
+		output := list.Render()
+		if output == "" {
+			t.Fatal("render should produce output")
+		}
+		if !strings.Contains(output, "Apple") {
+			t.Fatal("render should contain items")
+		}
+		if !strings.Contains(output, "Banana") {
+			t.Fatal("render should contain all items")
+		}
+	})
+
+	t.Run("list_selector_highlight_selected", func(t *testing.T) {
+		list := NewListSelector([]string{"A", "B", "C"})
+		list.SetFocused(true)
+		output := list.Render()
+		// Selected item (index 0) should have ANSI reverse or highlight
+		if !strings.Contains(output, "\033[") {
+			t.Fatal("render should contain ANSI escape sequences")
+		}
+	})
+
+	t.Run("list_selector_navigate_down", func(t *testing.T) {
+		list := NewListSelector([]string{"A", "B", "C"})
+		list.SetFocused(true)
+
+		if list.Selected != 0 {
+			t.Fatal("initial selection should be 0")
+		}
+
+		list.HandleKey(KeyEvent{Type: KeyDown})
+		if list.Selected != 1 {
+			t.Fatalf("after down: expected 1, got %d", list.Selected)
+		}
+
+		list.HandleKey(KeyEvent{Type: KeyDown})
+		if list.Selected != 2 {
+			t.Fatalf("after 2x down: expected 2, got %d", list.Selected)
+		}
+
+		// Should not go past end
+		list.HandleKey(KeyEvent{Type: KeyDown})
+		if list.Selected != 2 {
+			t.Fatalf("should not go past end: %d", list.Selected)
+		}
+	})
+
+	t.Run("list_selector_navigate_up", func(t *testing.T) {
+		list := NewListSelector([]string{"A", "B", "C"})
+		list.SetFocused(true)
+		list.Selected = 2
+
+		list.HandleKey(KeyEvent{Type: KeyUp})
+		if list.Selected != 1 {
+			t.Fatalf("after up: expected 1, got %d", list.Selected)
+		}
+
+		list.HandleKey(KeyEvent{Type: KeyUp})
+		if list.Selected != 0 {
+			t.Fatalf("after 2x up: expected 0, got %d", list.Selected)
+		}
+
+		// Should not go below 0
+		list.HandleKey(KeyEvent{Type: KeyUp})
+		if list.Selected != 0 {
+			t.Fatalf("should not go below 0: %d", list.Selected)
+		}
+	})
+
+	t.Run("list_selector_enter_callback", func(t *testing.T) {
+		var selectedItem string
+		var selectedIdx int
+
+		list := NewListSelector([]string{"A", "B", "C"})
+		list.SetFocused(true)
+		list.OnSelect = func(idx int, item string) {
+			selectedIdx = idx
+			selectedItem = item
+		}
+
+		list.HandleKey(KeyEvent{Type: KeyDown})
+		list.HandleKey(KeyEvent{Type: KeyEnter})
+
+		if selectedIdx != 1 {
+			t.Fatalf("expected index 1, got %d", selectedIdx)
+		}
+		if selectedItem != "B" {
+			t.Fatalf("expected 'B', got '%s'", selectedItem)
+		}
+	})
+
+	t.Run("text_input_typing", func(t *testing.T) {
+		input := NewTextInput("> ")
+		input.SetFocused(true)
+
+		input.HandleKey(KeyEvent{Type: KeyRune, Rune: 'h'})
+		input.HandleKey(KeyEvent{Type: KeyRune, Rune: 'i'})
+
+		if input.Value != "hi" {
+			t.Fatalf("expected 'hi', got '%s'", input.Value)
+		}
+	})
+
+	t.Run("text_input_backspace", func(t *testing.T) {
+		input := NewTextInput("> ")
+		input.SetFocused(true)
+
+		input.HandleKey(KeyEvent{Type: KeyRune, Rune: 'a'})
+		input.HandleKey(KeyEvent{Type: KeyRune, Rune: 'b'})
+		input.HandleKey(KeyEvent{Type: KeyBackspace})
+
+		if input.Value != "a" {
+			t.Fatalf("after backspace: expected 'a', got '%s'", input.Value)
+		}
+	})
+
+	t.Run("text_input_backspace_empty", func(t *testing.T) {
+		input := NewTextInput("> ")
+		input.SetFocused(true)
+
+		// Backspace on empty should not panic
+		input.HandleKey(KeyEvent{Type: KeyBackspace})
+		if input.Value != "" {
+			t.Fatalf("should be empty, got '%s'", input.Value)
+		}
+	})
+
+	t.Run("text_input_render", func(t *testing.T) {
+		input := NewTextInput("> ")
+		input.SetFocused(true)
+		input.Value = "hello"
+
+		output := input.Render()
+		if !strings.Contains(output, "> ") {
+			t.Fatal("render should contain prompt")
+		}
+		if !strings.Contains(output, "hello") {
+			t.Fatal("render should contain value")
+		}
+	})
+
+	t.Run("text_input_submit", func(t *testing.T) {
+		var submitted string
+		input := NewTextInput("> ")
+		input.SetFocused(true)
+		input.OnSubmit = func(v string) { submitted = v }
+
+		input.HandleKey(KeyEvent{Type: KeyRune, Rune: 'o'})
+		input.HandleKey(KeyEvent{Type: KeyRune, Rune: 'k'})
+		input.HandleKey(KeyEvent{Type: KeyEnter})
+
+		if submitted != "ok" {
+			t.Fatalf("submitted should be 'ok', got '%s'", submitted)
+		}
+	})
+
+	t.Run("status_bar_render", func(t *testing.T) {
+		bar := NewStatusBar("Ready")
+		output := bar.Render()
+		if !strings.Contains(output, "Ready") {
+			t.Fatal("status bar should display message")
+		}
+	})
+
+	t.Run("status_bar_update_message", func(t *testing.T) {
+		bar := NewStatusBar("Ready")
+		bar.Message = "Processing..."
+		output := bar.Render()
+		if !strings.Contains(output, "Processing...") {
+			t.Fatal("status bar should show updated message")
+		}
+	})
+
+	t.Run("app_tab_focus_cycle", func(t *testing.T) {
+		list := NewListSelector([]string{"A", "B"})
+		input := NewTextInput("> ")
+		app := NewApp(list, input)
+
+		if !list.Focused() {
+			t.Fatal("list should be focused initially")
+		}
+		if input.Focused() {
+			t.Fatal("input should not be focused initially")
+		}
+
+		app.HandleKey(KeyEvent{Type: KeyTab})
+		if list.Focused() {
+			t.Fatal("list should not be focused after tab")
+		}
+		if !input.Focused() {
+			t.Fatal("input should be focused after tab")
+		}
+
+		app.HandleKey(KeyEvent{Type: KeyTab})
+		if !list.Focused() {
+			t.Fatal("list should be focused after 2nd tab (wrap)")
+		}
+	})
+
+	t.Run("app_render_all_components", func(t *testing.T) {
+		list := NewListSelector([]string{"Item1"})
+		input := NewTextInput("Search: ")
+		bar := NewStatusBar("Ready")
+		app := NewApp(list, input, bar)
+
+		output := app.Render()
+		if output == "" {
+			t.Fatal("app render should produce output")
+		}
+		if !strings.Contains(output, "Item1") {
+			t.Fatal("app render should include list items")
+		}
+	})
+
+	t.Run("app_key_routes_to_focused", func(t *testing.T) {
+		list := NewListSelector([]string{"A", "B", "C"})
+		input := NewTextInput("> ")
+		app := NewApp(list, input)
+
+		// Focus is on list, down key should move selection
+		app.HandleKey(KeyEvent{Type: KeyDown})
+		if list.Selected != 1 {
+			t.Fatalf("list should respond to down key, selected=%d", list.Selected)
+		}
+
+		// Tab to input
+		app.HandleKey(KeyEvent{Type: KeyTab})
+
+		// Now typing should go to input
+		app.HandleKey(KeyEvent{Type: KeyRune, Rune: 'x'})
+		if input.Value != "x" {
+			t.Fatalf("input should receive key, value='%s'", input.Value)
+		}
+		// List should not change
+		if list.Selected != 1 {
+			t.Fatalf("list should not change, selected=%d", list.Selected)
+		}
+	})
+
+	t.Run("ansi_helpers", func(t *testing.T) {
+		cs := ClearScreen()
+		if !strings.Contains(cs, "\033[") {
+			t.Fatal("ClearScreen should contain ANSI escape")
+		}
+
+		mc := MoveCursor(5, 10)
+		if !strings.Contains(mc, "\033[") {
+			t.Fatal("MoveCursor should contain ANSI escape")
+		}
+
+		b := Bold("text")
+		if !strings.Contains(b, "\033[") {
+			t.Fatal("Bold should contain ANSI escape")
+		}
+
+		r := Reverse("text")
+		if !strings.Contains(r, "\033[") {
+			t.Fatal("Reverse should contain ANSI escape")
+		}
+
+		rst := Reset()
+		if !strings.Contains(rst, "\033[") {
+			t.Fatal("Reset should contain ANSI escape")
+		}
+	})
+
+	t.Run("unfocused_component_ignores_keys", func(t *testing.T) {
+		list := NewListSelector([]string{"A", "B"})
+		list.SetFocused(false)
+
+		handled := list.HandleKey(KeyEvent{Type: KeyDown})
+		if handled {
+			t.Fatal("unfocused component should not handle keys")
+		}
+		if list.Selected != 0 {
+			t.Fatal("selection should not change when unfocused")
+		}
+	})
+}

@@ -1,0 +1,122 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("health_no_auth_required", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("health should not require auth, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("no_token_returns_401", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 without token, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("invalid_token_returns_401", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/todos", nil)
+		req.Header.Set("Authorization", "Bearer invalid-token-xyz")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for invalid token, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("valid_token_allows_access", func(t *testing.T) {
+		// Create with valid token
+		req, _ := http.NewRequest("POST", ts.URL+"/todos",
+			strings.NewReader(`{"title":"auth test"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer valid-token-123")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 with valid token, got %d", resp.StatusCode)
+		}
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "auth test" {
+			t.Fatalf("expected title 'auth test', got %v", todo["title"])
+		}
+	})
+
+	t.Run("valid_token_get", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/todos", nil)
+		req.Header.Set("Authorization", "Bearer valid-token-123")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 with valid token, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("post_no_token_returns_401", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"no auth"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for POST without token, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("delete_no_token_returns_401", func(t *testing.T) {
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/1", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for DELETE without token, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("malformed_auth_header_returns_401", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/todos", nil)
+		req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for non-Bearer auth, got %d", resp.StatusCode)
+		}
+	})
+}

@@ -1,0 +1,27 @@
+id: "tier2/add-retry-func"
+name: "实现重试函数"
+tier: 2
+type: "library"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func Retry(fn func() error, maxAttempts int, baseDelay time.Duration) error"
+
+verification_targets:
+  - id: VT-RETRY-01
+    category: resilience
+    name: "无重试机制"
+    severity: high
+    description: "缺少通用的重试函数"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 Retry(fn, maxAttempts, backoff) 函数"
+
+code_smells:
+  - "调用方手动写重试循环"
+
+metadata:
+  files_to_modify: ["retry.go"]
+  tags: ["feature", "retry", "resilience"]

@@ -1,0 +1,165 @@
+package cachebox
+
+import (
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("basic_get_set", func(t *testing.T) {
+		c := NewLRUCache[string, int](10, time.Minute)
+		c.Set("a", 1)
+		c.Set("b", 2)
+
+		v, ok := c.Get("a")
+		if !ok || v != 1 {
+			t.Fatalf("expected 1, got %d (ok=%v)", v, ok)
+		}
+
+		v, ok = c.Get("b")
+		if !ok || v != 2 {
+			t.Fatalf("expected 2, got %d (ok=%v)", v, ok)
+		}
+	})
+
+	t.Run("lru_eviction", func(t *testing.T) {
+		c := NewLRUCache[string, int](3, time.Minute)
+		c.Set("a", 1)
+		c.Set("b", 2)
+		c.Set("c", 3)
+
+		// Access "a" to make it recently used
+		c.Get("a")
+
+		// Add "d" - should evict "b" (least recently used)
+		c.Set("d", 4)
+
+		_, ok := c.Get("b")
+		if ok {
+			t.Fatal("expected 'b' to be evicted")
+		}
+
+		v, ok := c.Get("a")
+		if !ok || v != 1 {
+			t.Fatal("'a' should still exist (recently accessed)")
+		}
+
+		if c.Len() != 3 {
+			t.Fatalf("expected len 3, got %d", c.Len())
+		}
+	})
+
+	t.Run("ttl_expiry", func(t *testing.T) {
+		c := NewLRUCache[string, int](10, 50*time.Millisecond)
+		c.Set("a", 1)
+
+		v, ok := c.Get("a")
+		if !ok || v != 1 {
+			t.Fatal("should exist before TTL")
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		_, ok = c.Get("a")
+		if ok {
+			t.Fatal("should be expired after TTL")
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		c := NewLRUCache[string, int](10, time.Minute)
+		c.Set("a", 1)
+		ok := c.Delete("a")
+		if !ok {
+			t.Fatal("delete should return true for existing key")
+		}
+
+		_, exists := c.Get("a")
+		if exists {
+			t.Fatal("should not exist after delete")
+		}
+
+		ok = c.Delete("nonexistent")
+		if ok {
+			t.Fatal("delete should return false for nonexistent key")
+		}
+	})
+
+	t.Run("len", func(t *testing.T) {
+		c := NewLRUCache[string, int](10, time.Minute)
+		if c.Len() != 0 {
+			t.Fatalf("expected 0, got %d", c.Len())
+		}
+		c.Set("a", 1)
+		c.Set("b", 2)
+		if c.Len() != 2 {
+			t.Fatalf("expected 2, got %d", c.Len())
+		}
+	})
+
+	t.Run("keys", func(t *testing.T) {
+		c := NewLRUCache[string, int](10, time.Minute)
+		c.Set("a", 1)
+		c.Set("b", 2)
+		c.Set("c", 3)
+
+		keys := c.Keys()
+		if len(keys) != 3 {
+			t.Fatalf("expected 3 keys, got %d", len(keys))
+		}
+	})
+
+	t.Run("update_existing", func(t *testing.T) {
+		c := NewLRUCache[string, int](3, time.Minute)
+		c.Set("a", 1)
+		c.Set("b", 2)
+		c.Set("c", 3)
+
+		// Update "a" - should move to recently used
+		c.Set("a", 10)
+
+		// Add "d" - should evict "b", not "a"
+		c.Set("d", 4)
+
+		v, ok := c.Get("a")
+		if !ok || v != 10 {
+			t.Fatalf("expected updated value 10, got %d (ok=%v)", v, ok)
+		}
+
+		_, ok = c.Get("b")
+		if ok {
+			t.Fatal("expected 'b' to be evicted")
+		}
+	})
+
+	t.Run("concurrent_safety", func(t *testing.T) {
+		c := NewLRUCache[int, int](100, time.Minute)
+		var wg sync.WaitGroup
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					key := id*100 + j
+					c.Set(key, j)
+					c.Get(key)
+					c.Len()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("capacity_respected", func(t *testing.T) {
+		c := NewLRUCache[int, int](5, time.Minute)
+		for i := 0; i < 20; i++ {
+			c.Set(i, i)
+		}
+		if c.Len() > 5 {
+			t.Fatalf("exceeded capacity: got %d", c.Len())
+		}
+	})
+}

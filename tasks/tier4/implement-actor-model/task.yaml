@@ -1,0 +1,35 @@
+id: "tier4/implement-actor-model"
+name: "实现 Actor 模型消息传递"
+tier: 4
+type: "concurrency"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type Actor interface"
+  - "type Message struct"
+  - "type Mailbox struct"
+  - "type ActorSystem struct"
+  - "func NewActorSystem() *ActorSystem"
+  - "func (s *ActorSystem) Spawn(name string, actor Actor) *ActorRef"
+  - "func (ref *ActorRef) Send(msg Message)"
+
+verification_targets:
+  - id: VT-ACTOR-01
+    category: concurrency
+    name: "无 Actor 模型"
+    severity: high
+    description: "需要实现 Actor 消息传递系统"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 Actor 接口和 Mailbox"
+  - "实现 ActorSystem 生命周期管理"
+  - "实现消息传递和路由"
+
+code_smells:
+  - "只有空的接口定义"
+
+metadata:
+  files_to_modify: ["actor.go"]
+  tags: ["feature", "concurrency", "actor-model"]

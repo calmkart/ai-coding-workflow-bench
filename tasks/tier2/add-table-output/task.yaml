@@ -1,0 +1,27 @@
+id: "tier2/add-table-output"
+name: "添加表格输出"
+tier: 2
+type: "cli"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "CLI: taskcli list (table format output)"
+
+verification_targets:
+  - id: VT-TBL-01
+    category: feature
+    name: "简陋输出"
+    severity: low
+    description: "list 输出是简单 fmt.Println，应改为 tabwriter 表格"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "将 list 输出改为 tabwriter 表格格式"
+
+code_smells:
+  - "输出不对齐，可读性差"
+
+metadata:
+  files_to_modify: ["commands.go"]
+  tags: ["feature", "cli", "table"]

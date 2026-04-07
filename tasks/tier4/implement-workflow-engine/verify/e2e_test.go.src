@@ -1,0 +1,347 @@
+package workflow
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// mockRunner simulates step execution.
+type mockRunner struct {
+	results map[string]mockResult
+}
+
+type mockResult struct {
+	output string
+	err    error
+	delay  time.Duration
+}
+
+func (m *mockRunner) Run(ctx context.Context, command string) (string, error) {
+	r, ok := m.results[command]
+	if !ok {
+		return "ok", nil
+	}
+	if r.delay > 0 {
+		select {
+		case <-time.After(r.delay):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return r.output, r.err
+}
+
+func newMockRunner() *mockRunner {
+	return &mockRunner{results: make(map[string]mockResult)}
+}
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("parse_simple_workflow", func(t *testing.T) {
+		yaml := `name: test-workflow
+steps:
+  - name: build
+    command: go build
+  - name: test
+    command: go test
+    depends_on: build`
+
+		wf, err := ParseWorkflow([]byte(yaml))
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if wf.Name != "test-workflow" {
+			t.Fatalf("wrong name: %s", wf.Name)
+		}
+		if len(wf.Steps) != 2 {
+			t.Fatalf("expected 2 steps, got %d", len(wf.Steps))
+		}
+		if wf.Steps[0].Name != "build" {
+			t.Fatalf("step 0 name: %s", wf.Steps[0].Name)
+		}
+		if wf.Steps[1].DependsOn != "build" {
+			t.Fatalf("step 1 depends_on: %s", wf.Steps[1].DependsOn)
+		}
+	})
+
+	t.Run("parse_with_parallel_and_timeout", func(t *testing.T) {
+		yaml := `name: deploy
+steps:
+  - name: lint
+    command: golint
+    parallel: true
+    timeout: 30
+  - name: test
+    command: go test
+    parallel: true
+    timeout: 60`
+
+		wf, err := ParseWorkflow([]byte(yaml))
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+		if len(wf.Steps) != 2 {
+			t.Fatalf("expected 2 steps, got %d", len(wf.Steps))
+		}
+		if !wf.Steps[0].Parallel {
+			t.Fatal("step 0 should be parallel")
+		}
+		if wf.Steps[0].Timeout != 30 {
+			t.Fatalf("step 0 timeout: %d", wf.Steps[0].Timeout)
+		}
+	})
+
+	t.Run("execute_sequential_steps", func(t *testing.T) {
+		wf := &Workflow{
+			Name: "seq",
+			Steps: []Step{
+				{Name: "step1", Command: "cmd1"},
+				{Name: "step2", Command: "cmd2"},
+			},
+		}
+
+		runner := newMockRunner()
+		runner.results["cmd1"] = mockResult{output: "out1"}
+		runner.results["cmd2"] = mockResult{output: "out2"}
+
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if !result.Success {
+			t.Fatal("workflow should succeed")
+		}
+		if len(result.Steps) != 2 {
+			t.Fatalf("expected 2 step results, got %d", len(result.Steps))
+		}
+		if result.Steps[0].Status != "success" {
+			t.Fatalf("step1 status: %s", result.Steps[0].Status)
+		}
+	})
+
+	t.Run("step_failure_skips_dependents", func(t *testing.T) {
+		wf := &Workflow{
+			Name: "fail",
+			Steps: []Step{
+				{Name: "build", Command: "build-cmd"},
+				{Name: "test", Command: "test-cmd", DependsOn: "build"},
+				{Name: "deploy", Command: "deploy-cmd", DependsOn: "test"},
+			},
+		}
+
+		runner := newMockRunner()
+		runner.results["build-cmd"] = mockResult{err: errors.New("build failed")}
+
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if result.Success {
+			t.Fatal("workflow should fail")
+		}
+		if result.Steps[0].Status != "failed" {
+			t.Fatalf("build should be failed, got %s", result.Steps[0].Status)
+		}
+		if result.Steps[1].Status != "skipped" {
+			t.Fatalf("test should be skipped, got %s", result.Steps[1].Status)
+		}
+		if result.Steps[2].Status != "skipped" {
+			t.Fatalf("deploy should be skipped, got %s", result.Steps[2].Status)
+		}
+	})
+
+	t.Run("parallel_steps_execute_concurrently", func(t *testing.T) {
+		wf := &Workflow{
+			Name: "par",
+			Steps: []Step{
+				{Name: "a", Command: "slow-a", Parallel: true},
+				{Name: "b", Command: "slow-b", Parallel: true},
+			},
+		}
+
+		var running atomic.Int32
+		var maxRunning atomic.Int32
+
+		runner := &concurrentMockRunner{
+			running:    &running,
+			maxRunning: &maxRunning,
+			delay:      50 * time.Millisecond,
+		}
+
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if !result.Success {
+			t.Fatal("should succeed")
+		}
+		if maxRunning.Load() < 2 {
+			t.Fatalf("parallel steps should run concurrently, max running: %d", maxRunning.Load())
+		}
+	})
+
+	t.Run("step_timeout", func(t *testing.T) {
+		wf := &Workflow{
+			Name: "timeout",
+			Steps: []Step{
+				{Name: "slow", Command: "slow-cmd", Timeout: 1},
+			},
+		}
+
+		runner := newMockRunner()
+		runner.results["slow-cmd"] = mockResult{delay: 5 * time.Second}
+
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if result.Steps[0].Status != "timeout" && result.Steps[0].Status != "failed" {
+			t.Fatalf("slow step should timeout, got %s", result.Steps[0].Status)
+		}
+	})
+
+	t.Run("context_cancellation", func(t *testing.T) {
+		wf := &Workflow{
+			Name: "cancel",
+			Steps: []Step{
+				{Name: "slow", Command: "very-slow"},
+			},
+		}
+
+		runner := newMockRunner()
+		runner.results["very-slow"] = mockResult{delay: 10 * time.Second}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+
+		_, err := wf.Execute(ctx, runner)
+		// Should return quickly due to cancellation
+		if err == nil {
+			// Acceptable: either returns error or result with failed step
+		}
+	})
+
+	t.Run("dependency_ordering", func(t *testing.T) {
+		var order []string
+		wf := &Workflow{
+			Name: "deps",
+			Steps: []Step{
+				{Name: "c", Command: "c-cmd", DependsOn: "b"},
+				{Name: "b", Command: "b-cmd", DependsOn: "a"},
+				{Name: "a", Command: "a-cmd"},
+			},
+		}
+
+		runner := &orderTrackingRunner{order: &order}
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if !result.Success {
+			t.Fatal("should succeed")
+		}
+
+		// a should run before b, b before c
+		aIdx, bIdx, cIdx := -1, -1, -1
+		for i, name := range order {
+			switch name {
+			case "a-cmd":
+				aIdx = i
+			case "b-cmd":
+				bIdx = i
+			case "c-cmd":
+				cIdx = i
+			}
+		}
+		if aIdx >= bIdx || bIdx >= cIdx {
+			t.Fatalf("wrong order: a=%d, b=%d, c=%d", aIdx, bIdx, cIdx)
+		}
+	})
+
+	t.Run("result_includes_duration", func(t *testing.T) {
+		wf := &Workflow{
+			Name: "dur",
+			Steps: []Step{
+				{Name: "fast", Command: "fast-cmd"},
+			},
+		}
+		runner := newMockRunner()
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if result.Steps[0].Duration < 0 {
+			t.Fatal("duration should not be negative")
+		}
+	})
+
+	t.Run("empty_workflow", func(t *testing.T) {
+		wf := &Workflow{Name: "empty", Steps: []Step{}}
+		runner := newMockRunner()
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("empty workflow error: %v", err)
+		}
+		if !result.Success {
+			t.Fatal("empty workflow should succeed")
+		}
+	})
+
+	t.Run("step_output_captured", func(t *testing.T) {
+		wf := &Workflow{
+			Name: "output",
+			Steps: []Step{
+				{Name: "echo", Command: "echo-cmd"},
+			},
+		}
+		runner := newMockRunner()
+		runner.results["echo-cmd"] = mockResult{output: "hello world"}
+
+		result, err := wf.Execute(context.Background(), runner)
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if result.Steps[0].Output != "hello world" {
+			t.Fatalf("expected output 'hello world', got '%s'", result.Steps[0].Output)
+		}
+	})
+}
+
+// concurrentMockRunner tracks concurrent execution.
+type concurrentMockRunner struct {
+	running    *atomic.Int32
+	maxRunning *atomic.Int32
+	delay      time.Duration
+}
+
+func (r *concurrentMockRunner) Run(ctx context.Context, command string) (string, error) {
+	c := r.running.Add(1)
+	for {
+		old := r.maxRunning.Load()
+		if c <= old {
+			break
+		}
+		if r.maxRunning.CompareAndSwap(old, c) {
+			break
+		}
+	}
+	time.Sleep(r.delay)
+	r.running.Add(-1)
+	return "ok", nil
+}
+
+// orderTrackingRunner records execution order.
+type orderTrackingRunner struct {
+	order *[]string
+}
+
+func (r *orderTrackingRunner) Run(ctx context.Context, command string) (string, error) {
+	*r.order = append(*r.order, command)
+	return fmt.Sprintf("ran %s", command), nil
+}

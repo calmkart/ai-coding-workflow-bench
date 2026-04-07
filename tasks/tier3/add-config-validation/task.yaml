@@ -1,0 +1,31 @@
+id: "tier3/add-config-validation"
+name: "添加配置验证和默认值合并"
+tier: 3
+type: "cli"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "type Config struct"
+  - "func LoadConfig(path string) (*Config, error)"
+  - "func (c *Config) Validate() error"
+
+verification_targets:
+  - id: VT-CFGV-01
+    category: correctness
+    name: "配置无校验"
+    severity: high
+    description: "配置无校验直接用，需要添加 Validate() + 默认值合并 + 错误聚合"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加配置验证、默认值合并和错误聚合"
+
+code_smells:
+  - "配置值直接使用无验证"
+  - "缺少默认值"
+  - "单个错误返回，不聚合多个问题"
+
+metadata:
+  files_to_modify: ["config.go"]
+  tags: ["feature", "config", "validation"]

@@ -1,0 +1,94 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("bulk_create_success", func(t *testing.T) {
+		body := `[{"title":"todo-1","done":false},{"title":"todo-2","done":true},{"title":"todo-3","done":false}]`
+		resp, err := http.Post(ts.URL+"/todos/bulk", "application/json",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+
+		var created []map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		if len(created) != 3 {
+			t.Fatalf("expected 3 created, got %d", len(created))
+		}
+
+		// Each should have an ID
+		for i, td := range created {
+			if td["id"] == nil || td["id"].(float64) == 0 {
+				t.Fatalf("todo %d missing ID", i)
+			}
+		}
+	})
+
+	t.Run("bulk_create_empty_array_returns_400", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos/bulk", "application/json",
+			strings.NewReader(`[]`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("empty array: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("bulk_create_over_limit_returns_400", func(t *testing.T) {
+		var todos []map[string]any
+		for i := 0; i < 101; i++ {
+			todos = append(todos, map[string]any{"title": "todo", "done": false})
+		}
+		body, _ := json.Marshal(todos)
+		resp, err := http.Post(ts.URL+"/todos/bulk", "application/json",
+			strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("over limit: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("bulk_created_appear_in_list", func(t *testing.T) {
+		// Use fresh server
+		mux2 := setupRouter()
+		ts2 := httptest.NewServer(mux2)
+		defer ts2.Close()
+
+		body := `[{"title":"bulk-1","done":false},{"title":"bulk-2","done":false}]`
+		resp, _ := http.Post(ts2.URL+"/todos/bulk", "application/json",
+			strings.NewReader(body))
+		resp.Body.Close()
+
+		resp, _ = http.Get(ts2.URL + "/todos")
+		defer resp.Body.Close()
+
+		var todos []map[string]any
+		json.NewDecoder(resp.Body).Decode(&todos)
+		if len(todos) != 2 {
+			t.Fatalf("expected 2 in list, got %d", len(todos))
+		}
+	})
+}

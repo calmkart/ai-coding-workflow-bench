@@ -1,0 +1,155 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("not_found_error_format", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos/999")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", resp.StatusCode)
+		}
+
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+
+		errObj, ok := body["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected error object, got %v", body)
+		}
+		if errObj["code"] == nil || errObj["code"] == "" {
+			t.Fatal("error missing 'code' field")
+		}
+		if errObj["message"] == nil || errObj["message"] == "" {
+			t.Fatal("error missing 'message' field")
+		}
+	})
+
+	t.Run("bad_request_error_format", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":""}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+
+		errObj, ok := body["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected error object, got %v", body)
+		}
+		if errObj["code"] == nil || errObj["code"] == "" {
+			t.Fatal("error missing 'code' field")
+		}
+	})
+
+	t.Run("invalid_id_error_format", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos/abc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+		errObj, ok := body["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected structured error, got %v", body)
+		}
+		if errObj["code"] == nil {
+			t.Fatal("error missing code")
+		}
+	})
+
+	t.Run("invalid_body_error_format", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{invalid json`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+		errObj, ok := body["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected structured error, got %v", body)
+		}
+	})
+
+	t.Run("success_unchanged", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"test item"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+
+		var todo map[string]any
+		json.NewDecoder(resp.Body).Decode(&todo)
+		if todo["title"] != "test item" {
+			t.Fatalf("expected title 'test item', got %v", todo["title"])
+		}
+	})
+
+	t.Run("delete_not_found_error", func(t *testing.T) {
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/999", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", resp.StatusCode)
+		}
+
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+		errObj, ok := body["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected structured error for delete 404, got %v", body)
+		}
+		if errObj["code"] == nil {
+			t.Fatal("error missing code")
+		}
+	})
+
+	t.Run("content_type_on_error", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos/999")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/json") {
+			t.Fatalf("expected JSON content type on error, got %s", ct)
+		}
+	})
+}

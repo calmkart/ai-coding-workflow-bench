@@ -1,0 +1,187 @@
+package servicegroup
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+type testService struct {
+	name     string
+	started  atomic.Bool
+	stopped  atomic.Bool
+	startErr error
+	stopErr  error
+	startCh  chan struct{}
+}
+
+func newTestService(name string) *testService {
+	return &testService{name: name, startCh: make(chan struct{})}
+}
+
+func (s *testService) Start(ctx context.Context) error {
+	if s.startErr != nil {
+		return s.startErr
+	}
+	s.started.Store(true)
+	close(s.startCh)
+	<-ctx.Done()
+	return nil
+}
+
+func (s *testService) Stop(ctx context.Context) error {
+	s.stopped.Store(true)
+	return s.stopErr
+}
+
+func (s *testService) Name() string {
+	return s.name
+}
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("start_and_stop", func(t *testing.T) {
+		sg := NewServiceGroup()
+		svc := newTestService("svc1")
+		sg.Add(svc)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan error, 1)
+		go func() {
+			done <- sg.Run(ctx)
+		}()
+
+		// Wait for service to start
+		select {
+		case <-svc.startCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("service did not start")
+		}
+
+		if !svc.started.Load() {
+			t.Fatal("service should be started")
+		}
+
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Run did not return after cancel")
+		}
+
+		if !svc.stopped.Load() {
+			t.Fatal("service should be stopped after cancel")
+		}
+	})
+
+	t.Run("multiple_services", func(t *testing.T) {
+		sg := NewServiceGroup()
+		svc1 := newTestService("svc1")
+		svc2 := newTestService("svc2")
+		sg.Add(svc1)
+		sg.Add(svc2)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan error, 1)
+		go func() {
+			done <- sg.Run(ctx)
+		}()
+
+		select {
+		case <-svc1.startCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("svc1 did not start")
+		}
+		select {
+		case <-svc2.startCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("svc2 did not start")
+		}
+
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Run did not return")
+		}
+
+		if !svc1.stopped.Load() || !svc2.stopped.Load() {
+			t.Fatal("both services should be stopped")
+		}
+	})
+
+	t.Run("service_start_failure_stops_all", func(t *testing.T) {
+		sg := NewServiceGroup()
+		good := newTestService("good")
+		failing := newTestService("failing")
+		failing.startErr = errors.New("start failed")
+		sg.Add(good)
+		sg.Add(failing)
+
+		ctx := context.Background()
+		done := make(chan error, 1)
+		go func() {
+			done <- sg.Run(ctx)
+		}()
+
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("expected error from failing service")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Run did not return after service failure")
+		}
+	})
+
+	t.Run("shutdown_timeout", func(t *testing.T) {
+		sg := NewServiceGroup()
+		sg.WithShutdownTimeout(100 * time.Millisecond)
+
+		slow := newTestService("slow")
+		slow.stopErr = nil
+		// Override Stop to be slow
+		sg.Add(&slowStopService{testService: slow})
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan error, 1)
+		go func() {
+			done <- sg.Run(ctx)
+		}()
+
+		select {
+		case <-slow.startCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("service did not start")
+		}
+
+		cancel()
+
+		select {
+		case <-done:
+			// Good - returned within reasonable time
+		case <-time.After(5 * time.Second):
+			t.Fatal("Run did not return after shutdown timeout")
+		}
+	})
+}
+
+type slowStopService struct {
+	*testService
+}
+
+func (s *slowStopService) Stop(ctx context.Context) error {
+	s.stopped.Store(true)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(10 * time.Second):
+		return nil
+	}
+}

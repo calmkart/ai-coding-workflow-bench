@@ -1,0 +1,96 @@
+package main
+
+import (
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func buildCLI(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "taskcli")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build failed: %s\n%s", err, out)
+	}
+	return bin
+}
+
+func runCLI(t *testing.T, bin string, dir string, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		}
+	}
+	return string(out), exitCode
+}
+
+func TestBenchE2E(t *testing.T) {
+	bin := buildCLI(t)
+
+	setup := func(t *testing.T) string {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "pending task")
+		runCLI(t, bin, dir, "add", "done task")
+		runCLI(t, bin, dir, "done", "2")
+		return dir
+	}
+
+	t.Run("filter_done", func(t *testing.T) {
+		dir := setup(t)
+		out, code := runCLI(t, bin, dir, "list", "--status", "done")
+		if code != 0 {
+			t.Fatalf("expected exit 0, got %d: %s", code, out)
+		}
+		if !strings.Contains(out, "done task") {
+			t.Fatalf("expected 'done task' in output: %s", out)
+		}
+		if strings.Contains(out, "pending task") {
+			t.Fatalf("should not contain 'pending task': %s", out)
+		}
+	})
+
+	t.Run("filter_pending", func(t *testing.T) {
+		dir := setup(t)
+		out, _ := runCLI(t, bin, dir, "list", "--status", "pending")
+		if !strings.Contains(out, "pending task") {
+			t.Fatalf("expected 'pending task' in output: %s", out)
+		}
+		if strings.Contains(out, "done task") {
+			t.Fatalf("should not contain 'done task': %s", out)
+		}
+	})
+
+	t.Run("filter_all", func(t *testing.T) {
+		dir := setup(t)
+		out, _ := runCLI(t, bin, dir, "list", "--status", "all")
+		if !strings.Contains(out, "pending task") || !strings.Contains(out, "done task") {
+			t.Fatalf("expected both tasks: %s", out)
+		}
+	})
+
+	t.Run("default_shows_all", func(t *testing.T) {
+		dir := setup(t)
+		out, _ := runCLI(t, bin, dir, "list")
+		if !strings.Contains(out, "pending task") || !strings.Contains(out, "done task") {
+			t.Fatalf("expected both tasks by default: %s", out)
+		}
+	})
+
+	t.Run("invalid_status", func(t *testing.T) {
+		dir := setup(t)
+		_, code := runCLI(t, bin, dir, "list", "--status", "invalid")
+		if code == 0 {
+			t.Fatal("expected non-zero exit for invalid status")
+		}
+	})
+}

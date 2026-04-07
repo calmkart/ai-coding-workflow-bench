@@ -1,0 +1,108 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func buildCLI(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "taskcli")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build failed: %s\n%s", err, out)
+	}
+	return bin
+}
+
+func runCLI(t *testing.T, bin string, dir string, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		}
+	}
+	return string(out), exitCode
+}
+
+func TestBenchE2E(t *testing.T) {
+	bin := buildCLI(t)
+
+	t.Run("json_output", func(t *testing.T) {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "task one")
+		runCLI(t, bin, dir, "add", "task two")
+
+		out, code := runCLI(t, bin, dir, "list", "--format", "json")
+		if code != 0 {
+			t.Fatalf("expected exit 0, got %d: %s", code, out)
+		}
+
+		var tasks []map[string]any
+		if err := json.Unmarshal([]byte(out), &tasks); err != nil {
+			t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+		}
+
+		if len(tasks) != 2 {
+			t.Fatalf("expected 2 tasks, got %d", len(tasks))
+		}
+
+		if tasks[0]["title"] != "task one" {
+			t.Fatalf("expected 'task one', got '%s'", tasks[0]["title"])
+		}
+	})
+
+	t.Run("text_output_default", func(t *testing.T) {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "my task")
+
+		out, _ := runCLI(t, bin, dir, "list")
+		if !strings.Contains(out, "my task") {
+			t.Fatalf("expected text output with 'my task', got: %s", out)
+		}
+		// Should NOT be JSON
+		var tasks []map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &tasks); err == nil {
+			t.Fatal("default output should be text, not JSON")
+		}
+	})
+
+	t.Run("text_format_explicit", func(t *testing.T) {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "explicit text")
+
+		out, code := runCLI(t, bin, dir, "list", "--format", "text")
+		if code != 0 {
+			t.Fatalf("expected exit 0, got %d", code, out)
+		}
+		if !strings.Contains(out, "explicit text") {
+			t.Fatalf("expected text output, got: %s", out)
+		}
+	})
+
+	t.Run("json_empty_list", func(t *testing.T) {
+		dir := t.TempDir()
+		out, _ := runCLI(t, bin, dir, "list", "--format", "json")
+
+		var tasks []map[string]any
+		if err := json.Unmarshal([]byte(out), &tasks); err != nil {
+			t.Fatalf("invalid JSON for empty list: %v\noutput: %s", err, out)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("expected 0 tasks, got %d", len(tasks))
+		}
+	})
+
+	_ = os.Remove(filepath.Join(".", dataFile))
+}

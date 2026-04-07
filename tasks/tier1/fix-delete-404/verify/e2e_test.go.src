@@ -1,0 +1,91 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("delete_nonexistent_returns_404", func(t *testing.T) {
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/9999", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("delete_existing_returns_204", func(t *testing.T) {
+		// Create a todo first
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"temp todo","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+
+		// Delete it
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/1", nil)
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected 204, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("delete_already_deleted_returns_404", func(t *testing.T) {
+		// Create and delete
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"another","done":false}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/2", nil)
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+
+		// Delete again
+		req, _ = http.NewRequest("DELETE", ts.URL+"/todos/2", nil)
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("delete_invalid_id_returns_400", func(t *testing.T) {
+		req, _ := http.NewRequest("DELETE", ts.URL+"/todos/abc", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+}

@@ -1,0 +1,30 @@
+# Benchmark Report: {{ .Tag }}
+
+> Workflow: {{ .Workflow }} | Date: {{ .Date }} | Runs/task: {{ .RunsPerTask }}
+
+## Overall
+
+| Metric | Value |
+|--------|-------|
+| Tasks | {{ .TotalTasks }} |
+| Pass Rate (L4 E2E) | {{ printf "%.1f%%" .PassRate }} |
+| Avg Correctness | {{ printf "%.2f" .AvgCorrectness }} |
+
+## Per-Task Detail
+{{ if .TaskGroups }}
+{{ range .TaskGroups -}}
+### {{ .ID }} ({{ .PassCount }}/{{ .RunCount }} passed, avg={{ printf "%.2f" .AvgCorrectness }})
+
+| Run | Tier | Type | L1 | L2 | L3 | L4 | Correctness |
+|-----|------|------|----|----|----|----|-------------|
+{{ range .Runs -}}
+| #{{ .RunNumber }} | T{{ .Tier }} | {{ .Type }} | {{ if .L1 }}PASS{{ else }}**FAIL**{{ end }} | {{ .L2Pass }}/{{ .L2Total }} | {{ .L3Issues }} | {{ .L4Pass }}/{{ .L4Total }} | {{ if .L1 }}{{ printf "%.2f" .Correctness }}{{ else }}{{ printf "%.2f" .Correctness }} !!{{ end }} |
+{{ end }}
+{{ end -}}
+{{ else }}
+| Task | Tier | Type | L1 | L2 | L3 | L4 | Correctness |
+|------|------|------|----|----|----|----|-------------|
+{{ range .Tasks -}}
+| {{ .ID }} | T{{ .Tier }} | {{ .Type }} | {{ if .L1 }}PASS{{ else }}**FAIL**{{ end }} | {{ .L2Pass }}/{{ .L2Total }} | {{ .L3Issues }} | {{ .L4Pass }}/{{ .L4Total }} | {{ if .L1 }}{{ printf "%.2f" .Correctness }}{{ else }}{{ printf "%.2f" .Correctness }} !!{{ end }} |
+{{ end -}}
+{{ end }}

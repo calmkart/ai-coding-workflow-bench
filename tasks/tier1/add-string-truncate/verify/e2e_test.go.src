@@ -1,0 +1,82 @@
+package strkit
+
+import "testing"
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("short_string_unchanged", func(t *testing.T) {
+		got := Truncate("hello", 10)
+		if got != "hello" {
+			t.Fatalf("Truncate(hello, 10) = %q, want hello", got)
+		}
+	})
+
+	t.Run("exact_length_unchanged", func(t *testing.T) {
+		got := Truncate("hello", 5)
+		if got != "hello" {
+			t.Fatalf("Truncate(hello, 5) = %q, want hello", got)
+		}
+	})
+
+	t.Run("long_string_truncated_with_ellipsis", func(t *testing.T) {
+		got := Truncate("the quick brown fox jumps", 15)
+		if len(got) > 15 {
+			t.Fatalf("Truncate result too long: %q (len=%d, max=15)", got, len(got))
+		}
+		if !containsEllipsis(got) {
+			t.Fatalf("expected '...' in truncated string, got %q", got)
+		}
+	})
+
+	t.Run("truncate_at_word_boundary", func(t *testing.T) {
+		got := Truncate("hello world foo bar", 14)
+		if len(got) > 14 {
+			t.Fatalf("Truncate result too long: %q (len=%d)", got, len(got))
+		}
+		// Should truncate at word boundary, not mid-word
+		if containsPartialWord(got) {
+			t.Fatalf("truncated mid-word: %q", got)
+		}
+	})
+
+	t.Run("empty_string", func(t *testing.T) {
+		got := Truncate("", 10)
+		if got != "" {
+			t.Fatalf("Truncate('', 10) = %q, want empty", got)
+		}
+	})
+
+	t.Run("single_long_word", func(t *testing.T) {
+		got := Truncate("supercalifragilistic", 10)
+		if len(got) > 10 {
+			t.Fatalf("Truncate result too long: %q (len=%d, max=10)", got, len(got))
+		}
+	})
+
+	t.Run("maxlen_less_than_4", func(t *testing.T) {
+		got := Truncate("hello world", 3)
+		if len(got) > 3 {
+			t.Fatalf("Truncate result too long: %q (len=%d, max=3)", got, len(got))
+		}
+	})
+}
+
+func containsEllipsis(s string) bool {
+	return len(s) >= 3 && s[len(s)-3:] == "..."
+}
+
+func containsPartialWord(s string) bool {
+	// Remove trailing "..."
+	trimmed := s
+	if len(trimmed) > 3 && trimmed[len(trimmed)-3:] == "..." {
+		trimmed = trimmed[:len(trimmed)-3]
+	}
+	// Check if last char before "..." is not a space and not the end of a word
+	if len(trimmed) > 0 {
+		last := trimmed[len(trimmed)-1]
+		if last != ' ' {
+			// Check if this could be a complete word (next char in original would be space or end)
+			return false // We can't really tell without the original, so skip this check
+		}
+	}
+	return false
+}

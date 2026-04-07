@@ -1,0 +1,36 @@
+id: "tier4/implement-full-operator"
+name: "实现完整的 Operator"
+tier: 4
+type: "reconciler"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+  - "type Resource struct"
+  - "type Store struct"
+  - "type EventRecorder interface"
+
+verification_targets:
+  - id: VT-OP-01
+    category: architecture
+    name: "不完整的 Operator"
+    severity: critical
+    description: "需要完整 operator：资源定义、Reconciler、Status 管理、事件记录"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现完整的资源 Spec/Status/Conditions"
+  - "实现 Reconciler 状态机"
+  - "实现 Status 更新逻辑"
+  - "实现 EventRecorder"
+
+code_smells:
+  - "Reconciler 逻辑不完整"
+  - "没有 Status Conditions"
+  - "没有事件记录"
+  - "状态转换不清晰"
+
+metadata:
+  files_to_modify: ["types.go", "reconciler.go", "events.go", "store.go"]
+  tags: ["feature", "reconciler", "operator", "status"]

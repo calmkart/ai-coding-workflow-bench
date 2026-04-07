@@ -1,0 +1,28 @@
+id: "tier2/fix-status-conflict"
+name: "修复 Status 更新冲突"
+tier: 2
+type: "reconciler"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-CONF-01
+    category: correctness
+    name: "Status 冲突"
+    severity: high
+    description: "更新 status 时没有处理版本冲突"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加版本号和冲突重试"
+
+code_smells:
+  - "无乐观并发控制"
+  - "并发更新可能覆盖"
+
+metadata:
+  files_to_modify: ["reconciler.go", "types.go"]
+  tags: ["bugfix", "reconciler", "conflict"]

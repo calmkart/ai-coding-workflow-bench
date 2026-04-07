@@ -1,0 +1,256 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func postJSON(t *testing.T, url, body string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(url, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func getJSON(t *testing.T, url string) (int, map[string]any) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	return resp.StatusCode, result
+}
+
+func getJSONList(t *testing.T, url string) (int, []map[string]any) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var result []map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	return resp.StatusCode, result
+}
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("health_no_version_prefix", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("health should work without version prefix, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("v1_create_basic_todo", func(t *testing.T) {
+		resp := postJSON(t, ts.URL+"/v1/todos", `{"title":"v1-todo","done":false}`)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("v1 create: expected 201, got %d", resp.StatusCode)
+		}
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		if created["title"] != "v1-todo" {
+			t.Fatalf("v1 create: wrong title: %v", created["title"])
+		}
+		// v1 response should NOT have priority or tags
+		if _, ok := created["priority"]; ok {
+			t.Fatal("v1 response should not include priority")
+		}
+		if _, ok := created["tags"]; ok {
+			t.Fatal("v1 response should not include tags")
+		}
+	})
+
+	t.Run("v1_list_todos", func(t *testing.T) {
+		code, list := getJSONList(t, ts.URL+"/v1/todos")
+		if code != http.StatusOK {
+			t.Fatalf("v1 list: expected 200, got %d", code)
+		}
+		if len(list) == 0 {
+			t.Fatal("v1 list should return at least one todo")
+		}
+	})
+
+	t.Run("v2_create_with_priority_and_tags", func(t *testing.T) {
+		body := `{"title":"v2-todo","done":false,"priority":3,"tags":["urgent","backend"]}`
+		resp := postJSON(t, ts.URL+"/v2/todos", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("v2 create: expected 201, got %d", resp.StatusCode)
+		}
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		if created["priority"] == nil {
+			t.Fatal("v2 response should include priority")
+		}
+		if int(created["priority"].(float64)) != 3 {
+			t.Fatalf("v2 priority: expected 3, got %v", created["priority"])
+		}
+		tags, ok := created["tags"].([]any)
+		if !ok || len(tags) != 2 {
+			t.Fatalf("v2 tags: expected 2 tags, got %v", created["tags"])
+		}
+	})
+
+	t.Run("v2_invalid_priority", func(t *testing.T) {
+		body := `{"title":"bad","done":false,"priority":10}`
+		resp := postJSON(t, ts.URL+"/v2/todos", body)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("v2 invalid priority: expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("v1_todo_seen_in_v2_has_defaults", func(t *testing.T) {
+		// Create via v1
+		resp := postJSON(t, ts.URL+"/v1/todos", `{"title":"from-v1","done":false}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		// Read via v2
+		code, item := getJSON(t, fmt.Sprintf("%s/v2/todos/%d", ts.URL, id))
+		if code != http.StatusOK {
+			t.Fatalf("v2 get v1 todo: expected 200, got %d", code)
+		}
+		if int(item["priority"].(float64)) != 0 {
+			t.Fatalf("v1 todo in v2 should have priority 0, got %v", item["priority"])
+		}
+		tags, ok := item["tags"].([]any)
+		if !ok || len(tags) != 0 {
+			t.Fatalf("v1 todo in v2 should have empty tags, got %v", item["tags"])
+		}
+	})
+
+	t.Run("v2_todo_seen_in_v1_no_extra_fields", func(t *testing.T) {
+		// Create via v2 with priority and tags
+		body := `{"title":"from-v2","done":false,"priority":5,"tags":["test"]}`
+		resp := postJSON(t, ts.URL+"/v2/todos", body)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		id := int(created["id"].(float64))
+
+		// Read via v1
+		code, item := getJSON(t, fmt.Sprintf("%s/v1/todos/%d", ts.URL, id))
+		if code != http.StatusOK {
+			t.Fatalf("v1 get v2 todo: expected 200, got %d", code)
+		}
+		if _, ok := item["priority"]; ok {
+			t.Fatal("v1 should not expose priority field")
+		}
+		if _, ok := item["tags"]; ok {
+			t.Fatal("v1 should not expose tags field")
+		}
+		if item["title"] != "from-v2" {
+			t.Fatalf("v1 should show title, got %v", item["title"])
+		}
+	})
+
+	t.Run("v2_filter_by_priority", func(t *testing.T) {
+		// Create some v2 todos with different priorities
+		postJSON(t, ts.URL+"/v2/todos", `{"title":"p1","done":false,"priority":1}`)
+		postJSON(t, ts.URL+"/v2/todos", `{"title":"p1-2","done":false,"priority":1}`)
+
+		code, list := getJSONList(t, ts.URL+"/v2/todos?priority=1")
+		if code != http.StatusOK {
+			t.Fatalf("v2 filter: expected 200, got %d", code)
+		}
+		for _, item := range list {
+			if int(item["priority"].(float64)) != 1 {
+				t.Fatalf("filter by priority=1 returned item with priority %v", item["priority"])
+			}
+		}
+	})
+
+	t.Run("v2_filter_by_tag", func(t *testing.T) {
+		postJSON(t, ts.URL+"/v2/todos", `{"title":"tagged","done":false,"priority":0,"tags":["special"]}`)
+
+		code, list := getJSONList(t, ts.URL+"/v2/todos?tag=special")
+		if code != http.StatusOK {
+			t.Fatalf("v2 tag filter: expected 200, got %d", code)
+		}
+		found := false
+		for _, item := range list {
+			tags := item["tags"].([]any)
+			for _, tag := range tags {
+				if tag == "special" {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatal("tag filter should return items with 'special' tag")
+		}
+	})
+
+	t.Run("no_prefix_redirects_to_v1", func(t *testing.T) {
+		client := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		resp, err := client.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMovedPermanently {
+			t.Fatalf("no prefix: expected 301, got %d", resp.StatusCode)
+		}
+		loc := resp.Header.Get("Location")
+		if loc == "" || !strings.Contains(loc, "/v1/todos") {
+			t.Fatalf("redirect should point to /v1/todos, got %s", loc)
+		}
+	})
+
+	t.Run("v2_response_includes_api_version", func(t *testing.T) {
+		code, list := getJSONList(t, ts.URL+"/v2/todos")
+		if code != http.StatusOK {
+			t.Fatalf("v2 list: expected 200, got %d", code)
+		}
+		_ = list // we just need the response to have api_version
+		// Check a single item
+		resp := postJSON(t, ts.URL+"/v2/todos", `{"title":"ver-check","done":false}`)
+		defer resp.Body.Close()
+		var created map[string]any
+		json.NewDecoder(resp.Body).Decode(&created)
+		if created["api_version"] != "v2" {
+			t.Fatalf("v2 response should have api_version=v2, got %v", created["api_version"])
+		}
+	})
+
+	t.Run("shared_store_between_versions", func(t *testing.T) {
+		// Count v1 todos
+		_, listBefore := getJSONList(t, ts.URL+"/v1/todos")
+		countBefore := len(listBefore)
+
+		// Create via v2
+		resp := postJSON(t, ts.URL+"/v2/todos", `{"title":"shared-test","done":false}`)
+		resp.Body.Close()
+
+		// Count v1 todos again - should be +1
+		_, listAfter := getJSONList(t, ts.URL+"/v1/todos")
+		if len(listAfter) != countBefore+1 {
+			t.Fatalf("shared store: expected %d todos in v1 after v2 create, got %d", countBefore+1, len(listAfter))
+		}
+	})
+}

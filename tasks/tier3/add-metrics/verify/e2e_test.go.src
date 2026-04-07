@@ -1,0 +1,160 @@
+package statemgr
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("metrics_collector_interface", func(t *testing.T) {
+		var mc MetricsCollector = NewInMemoryMetrics()
+		_ = mc
+	})
+
+	t.Run("instrumented_reconciler", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "app1",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		inner := NewSimpleReconciler(store)
+		collector := NewInMemoryMetrics()
+		instrumented := NewInstrumentedReconciler(inner, collector)
+
+		// Verify it implements Reconciler
+		var _ Reconciler = instrumented
+
+		result := instrumented.Reconcile("app1")
+		if !result.Requeue {
+			t.Fatal("expected requeue")
+		}
+	})
+
+	t.Run("records_reconcile_count", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "app1",
+			Spec:   ResourceSpec{Replicas: 2, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		inner := NewSimpleReconciler(store)
+		collector := NewInMemoryMetrics()
+		instrumented := NewInstrumentedReconciler(inner, collector)
+
+		runner := NewRunner(instrumented)
+		runner.RunOnce("app1", 20)
+
+		snap := collector.Snapshot()
+		if snap.TotalReconciles == 0 {
+			t.Fatal("expected reconcile count > 0")
+		}
+	})
+
+	t.Run("records_requeue_count", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "app1",
+			Spec:   ResourceSpec{Replicas: 2, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		inner := NewSimpleReconciler(store)
+		collector := NewInMemoryMetrics()
+		instrumented := NewInstrumentedReconciler(inner, collector)
+
+		runner := NewRunner(instrumented)
+		runner.RunOnce("app1", 20)
+
+		snap := collector.Snapshot()
+		if snap.TotalRequeues == 0 {
+			t.Fatal("expected requeue count > 0")
+		}
+	})
+
+	t.Run("records_duration", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name:   "app1",
+			Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		inner := NewSimpleReconciler(store)
+		collector := NewInMemoryMetrics()
+		instrumented := NewInstrumentedReconciler(inner, collector)
+
+		runner := NewRunner(instrumented)
+		runner.RunOnce("app1", 20)
+
+		snap := collector.Snapshot()
+		if snap.AvgDuration <= 0 {
+			t.Fatalf("expected positive avg duration, got %v", snap.AvgDuration)
+		}
+	})
+
+	t.Run("not_found_no_error", func(t *testing.T) {
+		store := NewStore()
+		inner := NewSimpleReconciler(store)
+		collector := NewInMemoryMetrics()
+		instrumented := NewInstrumentedReconciler(inner, collector)
+
+		instrumented.Reconcile("nonexistent")
+
+		snap := collector.Snapshot()
+		if snap.TotalReconciles != 1 {
+			t.Fatalf("expected 1 reconcile, got %d", snap.TotalReconciles)
+		}
+		if snap.TotalErrors != 0 {
+			t.Fatalf("expected 0 errors, got %d", snap.TotalErrors)
+		}
+	})
+
+	t.Run("snapshot_struct", func(t *testing.T) {
+		snap := MetricsSnapshot{
+			TotalReconciles: 10,
+			TotalErrors:     2,
+			TotalRequeues:   5,
+			AvgDuration:     time.Millisecond,
+		}
+		if snap.TotalReconciles != 10 {
+			t.Fatalf("expected 10, got %d", snap.TotalReconciles)
+		}
+	})
+
+	t.Run("concurrent_metrics", func(t *testing.T) {
+		store := NewStore()
+		for i := 0; i < 5; i++ {
+			store.Put(&Resource{
+				Name:   "app" + string(rune('0'+i)),
+				Spec:   ResourceSpec{Replicas: 1, Image: "nginx"},
+				Status: ResourceStatus{Phase: "Pending"},
+			})
+		}
+
+		inner := NewSimpleReconciler(store)
+		collector := NewInMemoryMetrics()
+		instrumented := NewInstrumentedReconciler(inner, collector)
+
+		done := make(chan struct{})
+		for i := 0; i < 5; i++ {
+			go func(name string) {
+				runner := NewRunner(instrumented)
+				runner.RunOnce(name, 20)
+			}("app" + string(rune('0'+i)))
+		}
+
+		go func() {
+			time.Sleep(2 * time.Second)
+			close(done)
+		}()
+		<-done
+
+		snap := collector.Snapshot()
+		if snap.TotalReconciles == 0 {
+			t.Fatal("expected reconciles from concurrent runs")
+		}
+	})
+}

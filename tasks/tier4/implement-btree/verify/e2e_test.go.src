@@ -1,0 +1,267 @@
+package btree
+
+import (
+	"math/rand"
+	"sort"
+	"testing"
+)
+
+func intLess(a, b int) bool { return a < b }
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("basic_insert_search", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess)
+		tree.Insert(10, "ten")
+		tree.Insert(20, "twenty")
+		tree.Insert(5, "five")
+
+		v, ok := tree.Search(10)
+		if !ok || v != "ten" {
+			t.Fatalf("search 10: expected (ten, true), got (%v, %v)", v, ok)
+		}
+
+		v, ok = tree.Search(20)
+		if !ok || v != "twenty" {
+			t.Fatalf("search 20: expected (twenty, true), got (%v, %v)", v, ok)
+		}
+
+		_, ok = tree.Search(99)
+		if ok {
+			t.Fatal("search 99 should return false")
+		}
+	})
+
+	t.Run("insert_updates_existing_key", func(t *testing.T) {
+		tree := NewBTree[int, string](4, intLess)
+		tree.Insert(1, "one")
+		tree.Insert(1, "ONE")
+
+		v, ok := tree.Search(1)
+		if !ok || v != "ONE" {
+			t.Fatalf("update: expected ONE, got %v", v)
+		}
+		if tree.Len() != 1 {
+			t.Fatalf("update should not increase length, got %d", tree.Len())
+		}
+	})
+
+	t.Run("many_inserts_with_splits", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess) // order 3 = frequent splits
+		for i := 0; i < 100; i++ {
+			tree.Insert(i, "")
+		}
+		if tree.Len() != 100 {
+			t.Fatalf("expected 100 elements, got %d", tree.Len())
+		}
+		for i := 0; i < 100; i++ {
+			_, ok := tree.Search(i)
+			if !ok {
+				t.Fatalf("missing key %d after bulk insert", i)
+			}
+		}
+	})
+
+	t.Run("delete_basic", func(t *testing.T) {
+		tree := NewBTree[int, string](4, intLess)
+		tree.Insert(1, "a")
+		tree.Insert(2, "b")
+		tree.Insert(3, "c")
+
+		ok := tree.Delete(2)
+		if !ok {
+			t.Fatal("delete 2 should return true")
+		}
+
+		_, found := tree.Search(2)
+		if found {
+			t.Fatal("2 should not be found after delete")
+		}
+
+		if tree.Len() != 2 {
+			t.Fatalf("expected 2 elements after delete, got %d", tree.Len())
+		}
+	})
+
+	t.Run("delete_nonexistent", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess)
+		tree.Insert(1, "a")
+		ok := tree.Delete(99)
+		if ok {
+			t.Fatal("delete nonexistent should return false")
+		}
+	})
+
+	t.Run("delete_many_with_merge", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess)
+		for i := 0; i < 50; i++ {
+			tree.Insert(i, "")
+		}
+
+		// Delete in random order
+		perm := rand.Perm(50)
+		for _, i := range perm {
+			ok := tree.Delete(i)
+			if !ok {
+				t.Fatalf("delete %d should succeed", i)
+			}
+		}
+
+		if tree.Len() != 0 {
+			t.Fatalf("expected 0 elements after deleting all, got %d", tree.Len())
+		}
+	})
+
+	t.Run("range_query", func(t *testing.T) {
+		tree := NewBTree[int, string](4, intLess)
+		for i := 0; i < 20; i++ {
+			tree.Insert(i, "")
+		}
+
+		result := tree.Range(5, 15)
+		if len(result) != 11 { // 5,6,7,8,9,10,11,12,13,14,15
+			t.Fatalf("range [5,15]: expected 11 items, got %d", len(result))
+		}
+
+		// Should be sorted
+		for i := 1; i < len(result); i++ {
+			if result[i].Key <= result[i-1].Key {
+				t.Fatal("range result should be sorted")
+			}
+		}
+
+		// First should be 5, last should be 15
+		if result[0].Key != 5 || result[len(result)-1].Key != 15 {
+			t.Fatalf("range bounds wrong: first=%d, last=%d", result[0].Key, result[len(result)-1].Key)
+		}
+	})
+
+	t.Run("range_empty", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess)
+		for i := 0; i < 10; i++ {
+			tree.Insert(i, "")
+		}
+		result := tree.Range(100, 200)
+		if len(result) != 0 {
+			t.Fatalf("range [100,200] should be empty, got %d", len(result))
+		}
+	})
+
+	t.Run("min_max", func(t *testing.T) {
+		tree := NewBTree[int, string](4, intLess)
+		tree.Insert(50, "fifty")
+		tree.Insert(10, "ten")
+		tree.Insert(90, "ninety")
+		tree.Insert(30, "thirty")
+
+		min, ok := tree.Min()
+		if !ok || min.Key != 10 {
+			t.Fatalf("min: expected 10, got %v", min.Key)
+		}
+
+		max, ok := tree.Max()
+		if !ok || max.Key != 90 {
+			t.Fatalf("max: expected 90, got %v", max.Key)
+		}
+	})
+
+	t.Run("min_max_empty_tree", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess)
+		_, ok := tree.Min()
+		if ok {
+			t.Fatal("min of empty tree should return false")
+		}
+		_, ok = tree.Max()
+		if ok {
+			t.Fatal("max of empty tree should return false")
+		}
+	})
+
+	t.Run("in_order_traversal", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess)
+		values := []int{5, 3, 8, 1, 4, 7, 9, 2, 6}
+		for _, v := range values {
+			tree.Insert(v, "")
+		}
+
+		inorder := tree.InOrder()
+		if len(inorder) != len(values) {
+			t.Fatalf("inorder: expected %d items, got %d", len(values), len(inorder))
+		}
+
+		sorted := make([]int, len(values))
+		copy(sorted, values)
+		sort.Ints(sorted)
+
+		for i, kv := range inorder {
+			if kv.Key != sorted[i] {
+				t.Fatalf("inorder[%d]: expected %d, got %d", i, sorted[i], kv.Key)
+			}
+		}
+	})
+
+	t.Run("large_dataset", func(t *testing.T) {
+		tree := NewBTree[int, int](5, intLess)
+		n := 1000
+		for i := 0; i < n; i++ {
+			tree.Insert(i, i*10)
+		}
+
+		if tree.Len() != n {
+			t.Fatalf("expected %d, got %d", n, tree.Len())
+		}
+
+		// Search all
+		for i := 0; i < n; i++ {
+			v, ok := tree.Search(i)
+			if !ok || v != i*10 {
+				t.Fatalf("search %d: expected (%d, true), got (%d, %v)", i, i*10, v, ok)
+			}
+		}
+
+		// Delete half
+		for i := 0; i < n/2; i++ {
+			tree.Delete(i)
+		}
+
+		if tree.Len() != n/2 {
+			t.Fatalf("after deleting half: expected %d, got %d", n/2, tree.Len())
+		}
+
+		// Remaining should be searchable
+		for i := n / 2; i < n; i++ {
+			_, ok := tree.Search(i)
+			if !ok {
+				t.Fatalf("key %d should still exist", i)
+			}
+		}
+	})
+
+	t.Run("string_keys", func(t *testing.T) {
+		tree := NewBTree[string, int](4, func(a, b string) bool { return a < b })
+		tree.Insert("banana", 1)
+		tree.Insert("apple", 2)
+		tree.Insert("cherry", 3)
+
+		v, ok := tree.Search("apple")
+		if !ok || v != 2 {
+			t.Fatalf("search apple: expected (2, true), got (%d, %v)", v, ok)
+		}
+
+		inorder := tree.InOrder()
+		if inorder[0].Key != "apple" || inorder[1].Key != "banana" || inorder[2].Key != "cherry" {
+			t.Fatalf("string order wrong: %v", inorder)
+		}
+	})
+
+	t.Run("insert_delete_insert", func(t *testing.T) {
+		tree := NewBTree[int, string](3, intLess)
+		tree.Insert(1, "first")
+		tree.Delete(1)
+		tree.Insert(1, "second")
+
+		v, ok := tree.Search(1)
+		if !ok || v != "second" {
+			t.Fatalf("reinsert: expected (second, true), got (%v, %v)", v, ok)
+		}
+	})
+}

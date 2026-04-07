@@ -1,0 +1,89 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("normal_requests_pass", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("create_within_limit", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/todos", "application/json",
+			strings.NewReader(`{"title":"rate test"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201 within rate limit, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("burst_requests_eventually_limited", func(t *testing.T) {
+		// Make many rapid requests - eventually should get 429
+		got429 := false
+		for i := 0; i < 100; i++ {
+			resp, err := http.Get(ts.URL + "/todos")
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusTooManyRequests {
+				got429 = true
+				break
+			}
+		}
+		if !got429 {
+			t.Fatal("expected 429 after burst, but all requests passed")
+		}
+	})
+
+	t.Run("429_has_retry_after", func(t *testing.T) {
+		// Exhaust rate limit
+		for i := 0; i < 100; i++ {
+			resp, _ := http.Get(ts.URL + "/todos")
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusTooManyRequests {
+				retryAfter := resp.Header.Get("Retry-After")
+				if retryAfter == "" {
+					t.Fatal("429 response missing Retry-After header")
+				}
+				return
+			}
+		}
+		t.Fatal("could not trigger 429")
+	})
+
+	t.Run("rate_limit_remaining_header", func(t *testing.T) {
+		mux2 := setupRouter()
+		ts2 := httptest.NewServer(mux2)
+		defer ts2.Close()
+
+		resp, err := http.Get(ts2.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		remaining := resp.Header.Get("X-RateLimit-Remaining")
+		if remaining == "" {
+			t.Fatal("missing X-RateLimit-Remaining header")
+		}
+	})
+}

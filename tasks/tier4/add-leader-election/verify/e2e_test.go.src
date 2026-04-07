@@ -1,0 +1,302 @@
+package leaderelection
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("single_candidate_becomes_leader", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+		var started atomic.Bool
+
+		le := NewLeaderElector("node-1", store, LeaderOpts{
+			LeaseDuration: 5 * time.Second,
+			RenewDeadline: 3 * time.Second,
+			RetryPeriod:   500 * time.Millisecond,
+			OnStartedLeading: func() {
+				started.Store(true)
+			},
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		go le.Run(ctx)
+
+		time.Sleep(1 * time.Second)
+
+		if !le.IsLeader() {
+			t.Fatal("single candidate should become leader")
+		}
+		if !started.Load() {
+			t.Fatal("OnStartedLeading should have been called")
+		}
+	})
+
+	t.Run("only_one_leader_among_multiple", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+
+		electors := make([]*LeaderElector, 3)
+		for i := 0; i < 3; i++ {
+			electors[i] = NewLeaderElector(
+				string(rune('a'+i)),
+				store,
+				LeaderOpts{
+					LeaseDuration: 5 * time.Second,
+					RenewDeadline: 3 * time.Second,
+					RetryPeriod:   200 * time.Millisecond,
+				},
+			)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		for _, le := range electors {
+			go le.Run(ctx)
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+
+		leaderCount := 0
+		for _, le := range electors {
+			if le.IsLeader() {
+				leaderCount++
+			}
+		}
+
+		if leaderCount != 1 {
+			t.Fatalf("expected exactly 1 leader, got %d", leaderCount)
+		}
+	})
+
+	t.Run("leader_renews_lease", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+
+		le := NewLeaderElector("renewer", store, LeaderOpts{
+			LeaseDuration: 2 * time.Second,
+			RenewDeadline: 1 * time.Second,
+			RetryPeriod:   300 * time.Millisecond,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		go le.Run(ctx)
+		time.Sleep(500 * time.Millisecond)
+
+		if !le.IsLeader() {
+			t.Fatal("should be leader")
+		}
+
+		// Wait past initial lease duration — should still be leader due to renewal
+		time.Sleep(3 * time.Second)
+
+		if !le.IsLeader() {
+			t.Fatal("should still be leader after renewal")
+		}
+	})
+
+	t.Run("new_leader_after_old_stops", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+
+		var leader1Stopped atomic.Bool
+		var leader2Started atomic.Bool
+
+		le1 := NewLeaderElector("node-1", store, LeaderOpts{
+			LeaseDuration: 1 * time.Second,
+			RenewDeadline: 500 * time.Millisecond,
+			RetryPeriod:   200 * time.Millisecond,
+			OnStoppedLeading: func() {
+				leader1Stopped.Store(true)
+			},
+		})
+
+		le2 := NewLeaderElector("node-2", store, LeaderOpts{
+			LeaseDuration: 1 * time.Second,
+			RenewDeadline: 500 * time.Millisecond,
+			RetryPeriod:   200 * time.Millisecond,
+			OnStartedLeading: func() {
+				leader2Started.Store(true)
+			},
+		})
+
+		ctx1, cancel1 := context.WithCancel(context.Background())
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel2()
+
+		go le1.Run(ctx1)
+		time.Sleep(500 * time.Millisecond)
+
+		if !le1.IsLeader() {
+			t.Fatal("le1 should be leader")
+		}
+
+		// Start le2 (will be standby)
+		go le2.Run(ctx2)
+		time.Sleep(500 * time.Millisecond)
+
+		if le2.IsLeader() {
+			t.Fatal("le2 should not be leader while le1 is active")
+		}
+
+		// Stop le1
+		cancel1()
+		time.Sleep(300 * time.Millisecond)
+
+		// Wait for lease to expire and le2 to acquire
+		time.Sleep(2 * time.Second)
+
+		if !le2.IsLeader() {
+			t.Fatal("le2 should become leader after le1 stops")
+		}
+	})
+
+	t.Run("on_started_leading_callback", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+		var called atomic.Bool
+
+		le := NewLeaderElector("cb-test", store, LeaderOpts{
+			LeaseDuration: 5 * time.Second,
+			RenewDeadline: 3 * time.Second,
+			RetryPeriod:   200 * time.Millisecond,
+			OnStartedLeading: func() {
+				called.Store(true)
+			},
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		go le.Run(ctx)
+		time.Sleep(1 * time.Second)
+
+		if !called.Load() {
+			t.Fatal("OnStartedLeading should have been called")
+		}
+	})
+
+	t.Run("on_stopped_leading_callback", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+		var stopped atomic.Bool
+
+		le := NewLeaderElector("stop-test", store, LeaderOpts{
+			LeaseDuration: 5 * time.Second,
+			RenewDeadline: 3 * time.Second,
+			RetryPeriod:   200 * time.Millisecond,
+			OnStoppedLeading: func() {
+				stopped.Store(true)
+			},
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go le.Run(ctx)
+		time.Sleep(800 * time.Millisecond)
+
+		if !le.IsLeader() {
+			t.Fatal("should be leader")
+		}
+
+		cancel()
+		time.Sleep(500 * time.Millisecond)
+
+		if stopped.Load() != true {
+			t.Fatal("OnStoppedLeading should have been called after cancel")
+		}
+	})
+
+	t.Run("lease_store_version_conflict", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+
+		lease := &Lease{
+			HolderID:      "a",
+			LeaseDuration: 5 * time.Second,
+			RenewTime:     time.Now(),
+			AcquireTime:   time.Now(),
+			Version:       1,
+		}
+
+		err := store.Create("test-lease", lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Get lease
+		got, _ := store.Get("test-lease")
+
+		// Update with correct version
+		got.HolderID = "b"
+		err = store.Update("test-lease", got)
+		if err != nil {
+			t.Fatal("update with correct version should succeed")
+		}
+
+		// Try update with old version (stale)
+		stale := &Lease{
+			HolderID: "c",
+			Version:  1, // old version
+		}
+		err = store.Update("test-lease", stale)
+		if err == nil {
+			t.Fatal("update with stale version should fail")
+		}
+	})
+
+	t.Run("concurrent_election_safety", func(t *testing.T) {
+		store := NewInMemoryLeaseStore()
+
+		var wg sync.WaitGroup
+		var leaderCount atomic.Int32
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				le := NewLeaderElector(string(rune('a'+id)), store, LeaderOpts{
+					LeaseDuration: 2 * time.Second,
+					RenewDeadline: 1 * time.Second,
+					RetryPeriod:   100 * time.Millisecond,
+				})
+				go le.Run(ctx)
+				time.Sleep(2 * time.Second)
+				if le.IsLeader() {
+					leaderCount.Add(1)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		if leaderCount.Load() != 1 {
+			t.Fatalf("should have exactly 1 leader, got %d", leaderCount.Load())
+		}
+	})
+
+	t.Run("lease_expiry_check", func(t *testing.T) {
+		lease := &Lease{
+			HolderID:      "test",
+			RenewTime:     time.Now().Add(-10 * time.Second),
+			LeaseDuration: 5 * time.Second,
+		}
+		if !lease.IsExpired() {
+			t.Fatal("lease should be expired")
+		}
+
+		fresh := &Lease{
+			HolderID:      "test",
+			RenewTime:     time.Now(),
+			LeaseDuration: 5 * time.Second,
+		}
+		if fresh.IsExpired() {
+			t.Fatal("fresh lease should not be expired")
+		}
+	})
+}

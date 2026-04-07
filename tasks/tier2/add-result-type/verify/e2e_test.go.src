@@ -1,0 +1,85 @@
+package result
+
+import (
+	"errors"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("ok_result", func(t *testing.T) {
+		r := Ok(42)
+		if !r.IsOk() || r.IsErr() {
+			t.Fatal("expected ok")
+		}
+		if r.Value != 42 {
+			t.Fatalf("expected 42, got %d", r.Value)
+		}
+	})
+
+	t.Run("fail_result", func(t *testing.T) {
+		r := Fail[int](errors.New("boom"))
+		if r.IsOk() || !r.IsErr() {
+			t.Fatal("expected err")
+		}
+	})
+
+	t.Run("map_success", func(t *testing.T) {
+		r := Ok(10).Map(func(v int) int { return v * 2 })
+		if !r.IsOk() || r.Value != 20 {
+			t.Fatalf("expected 20, got %d", r.Value)
+		}
+	})
+
+	t.Run("map_failure_short_circuits", func(t *testing.T) {
+		r := Fail[int](errors.New("err")).Map(func(v int) int { return v * 2 })
+		if !r.IsErr() {
+			t.Fatal("expected err after map")
+		}
+	})
+
+	t.Run("flatmap_success", func(t *testing.T) {
+		r := Ok(10).FlatMap(func(v int) Result[int] {
+			return Ok(v + 5)
+		})
+		if !r.IsOk() || r.Value != 15 {
+			t.Fatalf("expected 15, got %d", r.Value)
+		}
+	})
+
+	t.Run("flatmap_failure", func(t *testing.T) {
+		r := Ok(10).FlatMap(func(v int) Result[int] {
+			return Fail[int](errors.New("inner fail"))
+		})
+		if !r.IsErr() {
+			t.Fatal("expected err from flatmap")
+		}
+	})
+
+	t.Run("unwrap_success", func(t *testing.T) {
+		v := Ok(42).Unwrap()
+		if v != 42 {
+			t.Fatalf("expected 42, got %d", v)
+		}
+	})
+
+	t.Run("unwrap_panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		Fail[int](errors.New("boom")).Unwrap()
+	})
+
+	t.Run("unwrap_or", func(t *testing.T) {
+		v := Fail[int](errors.New("err")).UnwrapOr(99)
+		if v != 99 {
+			t.Fatalf("expected 99, got %d", v)
+		}
+
+		v = Ok(42).UnwrapOr(99)
+		if v != 42 {
+			t.Fatalf("expected 42, got %d", v)
+		}
+	})
+}

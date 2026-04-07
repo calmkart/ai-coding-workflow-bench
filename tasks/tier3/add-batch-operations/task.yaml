@@ -1,0 +1,29 @@
+id: "tier3/add-batch-operations"
+name: "添加事务性批量操作"
+tier: 3
+type: "http-server"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-BATCH-01
+    category: feature
+    name: "无批量操作"
+    severity: medium
+    description: "只有单个 CRUD，需要 POST /todos/batch 支持事务性批量操作"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 POST /todos/batch 批量操作端点"
+  - "支持批量 create、update、delete，全部成功或全部回滚"
+
+code_smells:
+  - "只有单个资源 CRUD"
+  - "批量操作需要多次请求"
+
+metadata:
+  files_to_modify: ["main.go", "handlers.go"]
+  tags: ["feature", "batch", "transaction"]

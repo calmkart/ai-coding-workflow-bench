@@ -1,0 +1,29 @@
+id: "tier3/implement-batch-processor"
+name: "实现批处理器"
+tier: 3
+type: "concurrency"
+language: "go"
+estimated_minutes: 18
+
+api_contract:
+  - "type BatchProcessor[T any] struct"
+  - "func NewBatchProcessor[T any](batchSize int, flushInterval time.Duration, process func([]T) error) *BatchProcessor[T]"
+
+verification_targets:
+  - id: VT-BATCH-01
+    category: feature
+    name: "无批处理"
+    severity: medium
+    description: "需要实现批处理器：攒够 N 条或超时 T 后批量处理"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现批处理器，按数量或时间触发处理"
+
+code_smells:
+  - "逐条处理效率低"
+  - "无批量优化"
+
+metadata:
+  files_to_modify: ["batcher.go"]
+  tags: ["feature", "concurrency", "batch"]

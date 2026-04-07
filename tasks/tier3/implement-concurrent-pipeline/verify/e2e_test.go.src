@@ -1,0 +1,166 @@
+package concpipeline
+
+import (
+	"context"
+	"errors"
+	"sort"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("basic_pipeline", func(t *testing.T) {
+		results, err := RunPipeline(
+			context.Background(),
+			func(ctx context.Context, out chan<- int) {
+				for i := 1; i <= 5; i++ {
+					out <- i
+				}
+			},
+			func(x int) (int, error) { return x * 2, nil },
+			func(x int) (int, error) { return x + 1, nil },
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		sort.Ints(results)
+		expected := []int{3, 5, 7, 9, 11}
+		if len(results) != len(expected) {
+			t.Fatalf("expected %d results, got %d", len(expected), len(results))
+		}
+		for i, v := range expected {
+			if results[i] != v {
+				t.Fatalf("result[%d]: expected %d, got %d", i, v, results[i])
+			}
+		}
+	})
+
+	t.Run("context_cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		var produced atomic.Int32
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		_, _ = RunPipeline(
+			ctx,
+			func(ctx context.Context, out chan<- int) {
+				for i := 0; ; i++ {
+					select {
+					case <-ctx.Done():
+						return
+					case out <- i:
+						produced.Add(1)
+					}
+				}
+			},
+			func(x int) (int, error) {
+				time.Sleep(10 * time.Millisecond)
+				return x, nil
+			},
+			func(x int) (int, error) { return x, nil },
+		)
+
+		// Pipeline should have stopped
+		if produced.Load() > 100 {
+			t.Fatalf("expected pipeline to stop after cancel, produced %d", produced.Load())
+		}
+	})
+
+	t.Run("transform_error", func(t *testing.T) {
+		errBad := errors.New("bad value")
+		_, err := RunPipeline(
+			context.Background(),
+			func(ctx context.Context, out chan<- int) {
+				out <- 1
+				out <- -1
+				out <- 2
+			},
+			func(x int) (int, error) {
+				if x < 0 {
+					return 0, errBad
+				}
+				return x, nil
+			},
+			func(x int) (int, error) { return x, nil },
+		)
+		if err == nil {
+			t.Fatal("expected error from transform stage")
+		}
+	})
+
+	t.Run("concurrent_transform", func(t *testing.T) {
+		var maxConcurrent atomic.Int32
+		var current atomic.Int32
+
+		results, err := RunPipeline(
+			context.Background(),
+			func(ctx context.Context, out chan<- int) {
+				for i := 0; i < 20; i++ {
+					out <- i
+				}
+			},
+			func(x int) (int, error) {
+				c := current.Add(1)
+				if c > maxConcurrent.Load() {
+					maxConcurrent.Store(c)
+				}
+				time.Sleep(10 * time.Millisecond)
+				current.Add(-1)
+				return x * 2, nil
+			},
+			func(x int) (int, error) { return x, nil },
+			PipelineConfig{TransformWorkers: 4},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(results) != 20 {
+			t.Fatalf("expected 20 results, got %d", len(results))
+		}
+
+		if maxConcurrent.Load() < 2 {
+			t.Fatalf("expected concurrent transforms, max was %d", maxConcurrent.Load())
+		}
+	})
+
+	t.Run("empty_producer", func(t *testing.T) {
+		results, err := RunPipeline(
+			context.Background(),
+			func(ctx context.Context, out chan<- int) {
+				// produce nothing
+			},
+			func(x int) (int, error) { return x, nil },
+			func(x int) (int, error) { return x, nil },
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 0 {
+			t.Fatalf("expected 0 results, got %d", len(results))
+		}
+	})
+
+	t.Run("type_conversion", func(t *testing.T) {
+		results, err := RunPipeline(
+			context.Background(),
+			func(ctx context.Context, out chan<- string) {
+				out <- "hello"
+				out <- "world"
+			},
+			func(s string) (int, error) { return len(s), nil },
+			func(n int) (bool, error) { return n > 4, nil },
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+	})
+}

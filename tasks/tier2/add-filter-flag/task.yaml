@@ -1,0 +1,27 @@
+id: "tier2/add-filter-flag"
+name: "添加过滤参数"
+tier: 2
+type: "cli"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "CLI: taskcli list --status done|pending|all"
+
+verification_targets:
+  - id: VT-FILT-01
+    category: feature
+    name: "无过滤功能"
+    severity: medium
+    description: "list 显示所有项，无法按状态过滤"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 --status 过滤参数"
+
+code_smells:
+  - "无法筛选已完成/未完成的任务"
+
+metadata:
+  files_to_modify: ["commands.go", "main.go"]
+  tags: ["feature", "cli", "filtering"]

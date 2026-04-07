@@ -1,0 +1,99 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	mux := setupRouter()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	t.Run("page_size_abc_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page_size=abc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("page_abc_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page=abc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("page_size_empty_string_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page_size=")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		// Empty string for page_size should either be ignored or return 400
+		// We accept both 200 (ignored) and 400 (validated) as valid
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 200 or 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("page_size_negative_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page_size=-5")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("page_size_zero_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page_size=0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("valid_params_return_200", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos?page=1&page_size=10")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("no_params_return_200", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/todos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}

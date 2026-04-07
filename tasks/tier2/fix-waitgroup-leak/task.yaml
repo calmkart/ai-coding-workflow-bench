@@ -1,0 +1,28 @@
+id: "tier2/fix-waitgroup-leak"
+name: "修复 WaitGroup 泄漏"
+tier: 2
+type: "concurrency"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func ProcessAll(items []string) ([]string, error)"
+
+verification_targets:
+  - id: VT-WG-01
+    category: concurrency
+    name: "WaitGroup 泄漏"
+    severity: critical
+    description: "goroutine 中 panic 导致 WaitGroup 永不 Done"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "修复 panic 导致的 WaitGroup 永不 Done"
+
+code_smells:
+  - "wg.Done() 不在 defer 中"
+  - "panic 导致永久阻塞"
+
+metadata:
+  files_to_modify: ["processor.go"]
+  tags: ["bugfix", "concurrency", "waitgroup"]

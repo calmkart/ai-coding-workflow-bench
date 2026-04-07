@@ -1,0 +1,28 @@
+id: "tier2/add-config-file"
+name: "添加配置文件"
+tier: 2
+type: "cli"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "CLI: taskcli list (reads config.json)"
+
+verification_targets:
+  - id: VT-CFG-01
+    category: feature
+    name: "硬编码配置"
+    severity: medium
+    description: "配置硬编码，需要配置文件支持"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 JSON 配置文件加载"
+
+code_smells:
+  - "数据文件路径硬编码"
+  - "没有配置管理"
+
+metadata:
+  files_to_modify: ["commands.go", "main.go"]
+  tags: ["feature", "cli", "config"]

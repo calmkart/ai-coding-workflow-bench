@@ -1,0 +1,28 @@
+id: "tier2/fix-channel-deadlock"
+name: "修复 channel 死锁"
+tier: 2
+type: "concurrency"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func Process(items []string) []string"
+
+verification_targets:
+  - id: VT-DL-01
+    category: concurrency
+    name: "channel 死锁"
+    severity: critical
+    description: "unbuffered channel 导致死锁"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "修复 unbuffered channel 死锁"
+
+code_smells:
+  - "在同一 goroutine 中读写 unbuffered channel"
+  - "producer 和 consumer 的启动顺序导致死锁"
+
+metadata:
+  files_to_modify: ["pipeline.go"]
+  tags: ["bugfix", "concurrency", "deadlock"]

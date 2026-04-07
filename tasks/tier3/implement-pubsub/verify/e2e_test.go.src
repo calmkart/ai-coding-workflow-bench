@@ -1,0 +1,173 @@
+package pubsub
+
+import (
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("subscribe_and_publish", func(t *testing.T) {
+		ps := NewPubSub()
+		defer ps.Close()
+
+		ch := ps.Subscribe("test")
+		ps.Publish("test", "hello")
+
+		select {
+		case msg := <-ch:
+			if msg.Topic != "test" {
+				t.Fatalf("expected topic 'test', got '%s'", msg.Topic)
+			}
+			if msg.Data != "hello" {
+				t.Fatalf("expected data 'hello', got %v", msg.Data)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for message")
+		}
+	})
+
+	t.Run("topic_isolation", func(t *testing.T) {
+		ps := NewPubSub()
+		defer ps.Close()
+
+		chA := ps.Subscribe("topicA")
+		chB := ps.Subscribe("topicB")
+
+		ps.Publish("topicA", "for A")
+
+		select {
+		case msg := <-chA:
+			if msg.Data != "for A" {
+				t.Fatalf("expected 'for A', got %v", msg.Data)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timeout on topicA")
+		}
+
+		select {
+		case msg := <-chB:
+			t.Fatalf("topicB should not receive message, got %v", msg)
+		case <-time.After(100 * time.Millisecond):
+			// Good - no message
+		}
+	})
+
+	t.Run("multiple_subscribers", func(t *testing.T) {
+		ps := NewPubSub()
+		defer ps.Close()
+
+		ch1 := ps.Subscribe("multi")
+		ch2 := ps.Subscribe("multi")
+		ch3 := ps.Subscribe("multi")
+
+		ps.Publish("multi", "broadcast")
+
+		var count atomic.Int32
+		for _, ch := range []<-chan Message{ch1, ch2, ch3} {
+			select {
+			case <-ch:
+				count.Add(1)
+			case <-time.After(time.Second):
+				t.Fatal("timeout")
+			}
+		}
+
+		if count.Load() != 3 {
+			t.Fatalf("expected 3 receivers, got %d", count.Load())
+		}
+	})
+
+	t.Run("unsubscribe", func(t *testing.T) {
+		ps := NewPubSub()
+		defer ps.Close()
+
+		ch := ps.Subscribe("unsub")
+		ps.Unsubscribe("unsub", ch)
+
+		ps.Publish("unsub", "should not receive")
+
+		select {
+		case _, ok := <-ch:
+			if ok {
+				t.Fatal("should not receive after unsubscribe")
+			}
+		case <-time.After(200 * time.Millisecond):
+			// Good - channel closed or no message
+		}
+	})
+
+	t.Run("close_closes_channels", func(t *testing.T) {
+		ps := NewPubSub()
+		ch := ps.Subscribe("close")
+		ps.Close()
+
+		select {
+		case _, ok := <-ch:
+			if ok {
+				t.Fatal("channel should be closed after Close()")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("channel should be closed")
+		}
+	})
+
+	t.Run("publish_after_close", func(t *testing.T) {
+		ps := NewPubSub()
+		ps.Close()
+		err := ps.Publish("test", "data")
+		if err == nil {
+			t.Fatal("expected error publishing to closed PubSub")
+		}
+	})
+
+	t.Run("concurrent_publish", func(t *testing.T) {
+		ps := NewPubSub()
+		defer ps.Close()
+
+		ch := ps.Subscribe("conc")
+		var received atomic.Int32
+
+		go func() {
+			for range ch {
+				received.Add(1)
+			}
+		}()
+
+		for i := 0; i < 100; i++ {
+			go func(n int) {
+				ps.Publish("conc", n)
+			}(i)
+		}
+
+		time.Sleep(500 * time.Millisecond)
+
+		if received.Load() != 100 {
+			t.Fatalf("expected 100 messages, got %d", received.Load())
+		}
+	})
+
+	t.Run("non_blocking_publish", func(t *testing.T) {
+		ps := NewPubSub()
+		defer ps.Close()
+
+		// Subscribe but never read
+		ps.Subscribe("slow")
+
+		// Publish should not block
+		done := make(chan struct{})
+		go func() {
+			for i := 0; i < 100; i++ {
+				ps.Publish("slow", i)
+			}
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Good
+		case <-time.After(2 * time.Second):
+			t.Fatal("Publish blocked (slow consumer)")
+		}
+	})
+}

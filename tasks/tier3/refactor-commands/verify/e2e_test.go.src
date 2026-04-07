@@ -1,0 +1,101 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("command_interface_exists", func(t *testing.T) {
+		// Verify Command interface exists and is usable
+		var cmds []Command
+
+		reg := NewRegistry()
+		cmds = reg.List()
+		_ = cmds
+	})
+
+	t.Run("register_and_get", func(t *testing.T) {
+		reg := NewRegistry()
+		reg.Register(&AddCommand{})
+		reg.Register(&ListCommand{})
+
+		cmd, ok := reg.Get("add")
+		if !ok {
+			t.Fatal("expected to find 'add' command")
+		}
+		if cmd.Name() != "add" {
+			t.Fatalf("expected name 'add', got '%s'", cmd.Name())
+		}
+	})
+
+	t.Run("unknown_command", func(t *testing.T) {
+		reg := NewRegistry()
+		_, ok := reg.Get("nonexistent")
+		if ok {
+			t.Fatal("should not find nonexistent command")
+		}
+	})
+
+	t.Run("list_commands", func(t *testing.T) {
+		reg := NewRegistry()
+		reg.Register(&AddCommand{})
+		reg.Register(&ListCommand{})
+		reg.Register(&DoneCommand{})
+		reg.Register(&DeleteCommand{})
+
+		cmds := reg.List()
+		if len(cmds) < 4 {
+			t.Fatalf("expected at least 4 commands, got %d", len(cmds))
+		}
+	})
+
+	t.Run("command_has_description", func(t *testing.T) {
+		cmd := &AddCommand{}
+		if cmd.Description() == "" {
+			t.Fatal("AddCommand should have a description")
+		}
+	})
+
+	t.Run("add_command_run", func(t *testing.T) {
+		cmd := &AddCommand{}
+		err := cmd.Run([]string{"test task"})
+		if err != nil {
+			t.Fatalf("add command failed: %v", err)
+		}
+	})
+
+	t.Run("list_command_run", func(t *testing.T) {
+		cmd := &ListCommand{}
+		err := cmd.Run(nil)
+		if err != nil {
+			t.Fatalf("list command failed: %v", err)
+		}
+	})
+
+	t.Run("help_includes_all_commands", func(t *testing.T) {
+		reg := NewRegistry()
+		reg.Register(&AddCommand{})
+		reg.Register(&ListCommand{})
+		reg.Register(&DoneCommand{})
+
+		help := reg.Help()
+		if !strings.Contains(help, "add") {
+			t.Fatal("help should contain 'add'")
+		}
+		if !strings.Contains(help, "list") {
+			t.Fatal("help should contain 'list'")
+		}
+		if !strings.Contains(help, "done") {
+			t.Fatal("help should contain 'done'")
+		}
+	})
+
+	t.Run("done_command_returns_error", func(t *testing.T) {
+		cmd := &DoneCommand{}
+		err := cmd.Run([]string{"999"})
+		if err == nil {
+			t.Fatal("expected error for nonexistent task")
+		}
+	})
+}

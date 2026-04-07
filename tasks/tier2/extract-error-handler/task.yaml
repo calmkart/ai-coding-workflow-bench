@@ -1,0 +1,28 @@
+id: "tier2/extract-error-handler"
+name: "提取统一错误处理"
+tier: 2
+type: "http-server"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-ERR-01
+    category: error_handling
+    name: "重复错误处理"
+    severity: medium
+    description: "每个 handler 重复 http.Error 模式，应提取为统一函数"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "提取 errorResponse 函数统一 JSON 错误响应格式"
+
+code_smells:
+  - "每个 handler 都有 http.Error 调用且格式不统一"
+  - "错误响应是纯文本而非 JSON"
+
+metadata:
+  files_to_modify: ["handlers.go"]
+  tags: ["refactoring", "error-handling"]

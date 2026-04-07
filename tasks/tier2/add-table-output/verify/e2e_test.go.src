@@ -1,0 +1,86 @@
+package main
+
+import (
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func buildCLI(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "taskcli")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build failed: %s\n%s", err, out)
+	}
+	return bin
+}
+
+func runCLI(t *testing.T, bin string, dir string, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		}
+	}
+	return string(out), exitCode
+}
+
+func TestBenchE2E(t *testing.T) {
+	bin := buildCLI(t)
+
+	t.Run("table_has_header", func(t *testing.T) {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "test task")
+
+		out, _ := runCLI(t, bin, dir, "list")
+		upper := strings.ToUpper(out)
+		if !strings.Contains(upper, "ID") || !strings.Contains(upper, "TITLE") || !strings.Contains(upper, "STATUS") {
+			t.Fatalf("expected table header with ID, STATUS, TITLE, got: %s", out)
+		}
+	})
+
+	t.Run("table_shows_status", func(t *testing.T) {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "pending task")
+		runCLI(t, bin, dir, "add", "done task")
+		runCLI(t, bin, dir, "done", "2")
+
+		out, _ := runCLI(t, bin, dir, "list")
+		lower := strings.ToLower(out)
+		if !strings.Contains(lower, "pending") {
+			t.Fatalf("expected 'pending' status, got: %s", out)
+		}
+		if !strings.Contains(lower, "done") {
+			t.Fatalf("expected 'done' status, got: %s", out)
+		}
+	})
+
+	t.Run("table_aligned", func(t *testing.T) {
+		dir := t.TempDir()
+		runCLI(t, bin, dir, "add", "short")
+		runCLI(t, bin, dir, "add", "a much longer task title")
+
+		out, _ := runCLI(t, bin, dir, "list")
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if len(lines) < 3 { // header + 2 tasks
+			t.Fatalf("expected at least 3 lines, got %d: %s", len(lines), out)
+		}
+	})
+
+	t.Run("empty_table", func(t *testing.T) {
+		dir := t.TempDir()
+		out, _ := runCLI(t, bin, dir, "list")
+		if !strings.Contains(out, "No tasks") {
+			t.Fatalf("expected 'No tasks' for empty list, got: %s", out)
+		}
+	})
+}

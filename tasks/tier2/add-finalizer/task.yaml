@@ -1,0 +1,27 @@
+id: "tier2/add-finalizer"
+name: "添加 Finalizer 模式"
+tier: 2
+type: "reconciler"
+language: "go"
+estimated_minutes: 10
+
+api_contract:
+  - "type Reconciler interface { Reconcile(name string) Result }"
+
+verification_targets:
+  - id: VT-FIN-01
+    category: correctness
+    name: "缺少清理逻辑"
+    severity: high
+    description: "资源删除时没有清理逻辑"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 finalizer 模式，资源删除前执行清理"
+
+code_smells:
+  - "删除资源时直接移除，无清理"
+
+metadata:
+  files_to_modify: ["reconciler.go", "types.go"]
+  tags: ["feature", "reconciler", "finalizer"]

@@ -1,0 +1,35 @@
+id: "tier4/implement-raft-log"
+name: "实现简化版 Raft 日志复制"
+tier: 4
+type: "library"
+language: "go"
+estimated_minutes: 30
+
+api_contract:
+  - "type LogEntry struct"
+  - "type RaftNode struct"
+  - "func NewRaftNode(id string) *RaftNode"
+  - "func (n *RaftNode) AppendEntries(entries []LogEntry, leaderTerm int, prevIndex int, prevTerm int) (bool, int)"
+  - "func (n *RaftNode) Commit(index int) error"
+  - "func (n *RaftNode) Apply() []LogEntry"
+
+verification_targets:
+  - id: VT-RAFT-01
+    category: distributed_system
+    name: "无 Raft 日志复制"
+    severity: high
+    description: "需要实现简化版 Raft 日志"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "实现 LogEntry 和日志存储"
+  - "实现 AppendEntries RPC 逻辑"
+  - "实现 Commit 和 Apply"
+  - "实现 Leader/Follower 角色"
+
+code_smells:
+  - "只有空的类型定义"
+
+metadata:
+  files_to_modify: ["raft.go"]
+  tags: ["feature", "distributed-system", "raft", "consensus"]

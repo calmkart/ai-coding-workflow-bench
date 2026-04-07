@@ -1,0 +1,29 @@
+id: "tier3/add-auth-middleware"
+name: "添加 Bearer Token 认证中间件"
+tier: 3
+type: "http-server"
+language: "go"
+estimated_minutes: 15
+
+api_contract:
+  - "func setupRouter() http.Handler"
+
+verification_targets:
+  - id: VT-AUTH-01
+    category: security
+    name: "无认证"
+    severity: critical
+    description: "所有端点无认证保护，需要添加 Bearer token 中间件"
+    detection: "e2e test"
+
+refactoring_targets:
+  - "添加 Bearer token 认证中间件保护 CRUD 端点"
+  - "health 端点不需要认证"
+
+code_smells:
+  - "所有端点裸露，无认证"
+  - "无法区分用户"
+
+metadata:
+  files_to_modify: ["main.go", "handlers.go"]
+  tags: ["feature", "security", "middleware"]

@@ -1,0 +1,101 @@
+package statemgr
+
+import (
+	"testing"
+	"time"
+)
+
+func TestBenchE2E(t *testing.T) {
+	t.Run("result_has_requeue_after", func(t *testing.T) {
+		// Verify Result has RequeueAfter field
+		r := Result{Requeue: true, RequeueAfter: 5 * time.Second}
+		if r.RequeueAfter != 5*time.Second {
+			t.Fatalf("expected 5s, got %v", r.RequeueAfter)
+		}
+	})
+
+	t.Run("runner_respects_delay", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "test",
+			Spec: ResourceSpec{Replicas: 3, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		runner := NewRunner(rec)
+
+		start := time.Now()
+		runner.RunOnce("test", 10)
+		elapsed := time.Since(start)
+
+		// With proper delays, this should take some time
+		// Without delays it would be instant
+		if elapsed < 10*time.Millisecond {
+			t.Fatalf("reconcile loop too fast (%v) - no backoff?", elapsed)
+		}
+	})
+
+	t.Run("converges_to_ready", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "test",
+			Spec: ResourceSpec{Replicas: 2, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		runner := NewRunner(rec)
+
+		iterations := runner.RunOnce("test", 20)
+
+		res, _ := store.Get("test")
+		if res.Status.Phase != "Running" {
+			t.Fatalf("expected Running, got %s", res.Status.Phase)
+		}
+		if res.Status.ReadyReplicas != 2 {
+			t.Fatalf("expected 2 ready, got %d", res.Status.ReadyReplicas)
+		}
+
+		if iterations > 10 {
+			t.Fatalf("too many iterations: %d", iterations)
+		}
+	})
+
+	t.Run("not_found_no_requeue", func(t *testing.T) {
+		store := NewStore()
+		rec := NewSimpleReconciler(store)
+		result := rec.Reconcile("nonexistent")
+
+		if result.Requeue {
+			t.Fatal("should not requeue for missing resource")
+		}
+	})
+
+	t.Run("run_with_stop", func(t *testing.T) {
+		store := NewStore()
+		store.Put(&Resource{
+			Name: "infinite",
+			Spec: ResourceSpec{Replicas: 100, Image: "nginx"},
+			Status: ResourceStatus{Phase: "Pending"},
+		})
+
+		rec := NewSimpleReconciler(store)
+		runner := NewRunner(rec)
+
+		done := make(chan struct{})
+		go func() {
+			runner.Run("infinite")
+			close(done)
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		runner.Stop()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("runner did not stop")
+		}
+	})
+}
