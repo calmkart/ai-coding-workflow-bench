@@ -1,6 +1,4 @@
 // Package engine provides the benchmark execution engine.
-//
-// Spec: .planning/workflow-bench.md (section 5.1)
 package engine
 
 import (
@@ -73,9 +71,9 @@ func EnsureGitRepo(dir string) error {
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=workflow-bench",
-		"GIT_AUTHOR_EMAIL=bench@local",
+		"GIT_AUTHOR_EMAIL=noreply@workflow-bench",
 		"GIT_COMMITTER_NAME=workflow-bench",
-		"GIT_COMMITTER_EMAIL=bench@local",
+		"GIT_COMMITTER_EMAIL=noreply@workflow-bench",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit in %s: %w\noutput: %s", dir, err, string(out))

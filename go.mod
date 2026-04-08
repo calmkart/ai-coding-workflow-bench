@@ -1,4 +1,4 @@
-module github.com/calmp/workflow-bench
+module github.com/calmkart/ai-coding-workflow-bench
 
 go 1.22
 

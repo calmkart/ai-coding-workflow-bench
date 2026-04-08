@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calmp/workflow-bench/internal/store"
+	"github.com/calmkart/ai-coding-workflow-bench/internal/store"
 )
 
 func TestGenerateSummary(t *testing.T) {

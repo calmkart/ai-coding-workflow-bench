@@ -181,13 +181,23 @@ Standard HTTP server using Go stdlib `net/http`. The repo must export `setupRout
 
 Kubernetes operator using `controller-runtime`. E2E tests use `envtest` (real apiserver + etcd). The `metadata.envtest_k8s_version` field specifies the K8s version.
 
-### library (planned)
+> **Note:** The `reconciler` type covers Kubernetes-style operator patterns without requiring controller-runtime. This type is reserved for future tasks that use envtest and real controller-runtime.
+
+### library
 
 Go library package. E2E tests import and call the package directly.
 
-### cli (planned)
+### cli
 
 Command-line tool. E2E tests execute the binary and check output.
+
+### concurrency
+
+Tasks involving goroutines, channels, worker pools, and concurrent data structures. Uses the generic verify template (build + test + vet + E2E).
+
+### reconciler
+
+Tasks simulating Kubernetes-style reconciliation loops: state machines, finalizers, owner references, leader election. Uses the generic verify template (build + test + vet + E2E).
 
 ## Tier Guidelines
 

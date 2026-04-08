@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/calmp/workflow-bench/internal/adapter"
-	"github.com/calmp/workflow-bench/internal/config"
-	"github.com/calmp/workflow-bench/internal/metrics"
-	"github.com/calmp/workflow-bench/internal/store"
+	"github.com/calmkart/ai-coding-workflow-bench/internal/adapter"
+	"github.com/calmkart/ai-coding-workflow-bench/internal/config"
+	"github.com/calmkart/ai-coding-workflow-bench/internal/metrics"
+	"github.com/calmkart/ai-coding-workflow-bench/internal/store"
 )
 
 // RunConfig holds parameters for a benchmark run.
@@ -24,7 +24,7 @@ type RunConfig struct {
 	TimeoutMultiplier int
 	TasksDir          string
 	DBPath            string
-	WorkflowCfg      map[string]any // Per-workflow config passed to adapter constructor
+	WorkflowCfg       map[string]any // Per-workflow config passed to adapter constructor
 }
 
 // Execute runs the full benchmark pipeline.
@@ -54,7 +54,7 @@ func Execute(ctx context.Context, cfg RunConfig) error {
 	// Resolve adapter type from WorkflowCfg if present (e.g., custom workflow
 	// names like "my-workflow" map to an adapter type like "custom" via the
 	// "adapter" key in WorkflowCfg). Fall back to the workflow name itself
-	// for built-in adapters like "vanilla" or "v4-claude".
+	// for built-in adapters like "vanilla".
 	adapterName := cfg.Workflow
 	if cfg.WorkflowCfg != nil {
 		if a, ok := cfg.WorkflowCfg["adapter"].(string); ok && a != "" {
@@ -138,15 +138,15 @@ func executeOneRun(ctx context.Context, db *store.DB, adpt adapter.Adapter, task
 
 	// Insert initial run record.
 	run := &store.Run{
-		ID:          runID,
-		Tag:         cfg.Tag,
-		Workflow:    cfg.Workflow,
-		TaskID:      task.ID,
-		Tier:        task.Tier,
-		TaskType:    task.Type,
-		RunNumber:   runNum,
-		Status:      "running",
-		StartedAt:   now,
+		ID:        runID,
+		Tag:       cfg.Tag,
+		Workflow:  cfg.Workflow,
+		TaskID:    task.ID,
+		Tier:      task.Tier,
+		TaskType:  task.Type,
+		RunNumber: runNum,
+		Status:    "running",
+		StartedAt: now,
 	}
 
 	if err := db.InsertRun(run); err != nil {
@@ -253,12 +253,12 @@ func executeOneRun(ctx context.Context, db *store.DB, adpt adapter.Adapter, task
 
 	// Calculate correctness score.
 	correctness := metrics.CalculateCorrectness(metrics.CorrectnessInput{
-		L1Build:    verifyResult.L1Build,
-		L2Passed:   verifyResult.L2Passed,
-		L2Total:    verifyResult.L2Total,
-		L3Issues:   verifyResult.L3Issues,
-		L4Passed:   verifyResult.L4Passed,
-		L4Total:    verifyResult.L4Total,
+		L1Build:             verifyResult.L1Build,
+		L2Passed:            verifyResult.L2Passed,
+		L2Total:             verifyResult.L2Total,
+		L3Issues:            verifyResult.L3Issues,
+		L4Passed:            verifyResult.L4Passed,
+		L4Total:             verifyResult.L4Total,
 		CriticalVTFailCount: 0, // P1: not yet implementing VT detection
 	})
 	run.CorrectnessScore = &correctness

@@ -1,18 +1,16 @@
 // Package metrics provides benchmark score calculations.
-//
-// Spec: .planning/workflow-bench.md (section 4.2.A)
 package metrics
 
 import "math"
 
 // CorrectnessInput holds the inputs for correctness score calculation.
 type CorrectnessInput struct {
-	L1Build    bool
-	L2Passed   int
-	L2Total    int
-	L3Issues   int
-	L4Passed   int
-	L4Total    int
+	L1Build             bool
+	L2Passed            int
+	L2Total             int
+	L3Issues            int
+	L4Passed            int
+	L4Total             int
 	CriticalVTFailCount int
 }
 

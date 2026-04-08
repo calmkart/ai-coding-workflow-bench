@@ -24,10 +24,6 @@ workflows:
   vanilla:
     adapter: vanilla               # Direct Claude CLI execution
 
-  v4-claude:
-    adapter: v4-claude             # Multi-agent via --agent manager
-    agents_dir: "~/.claude/agents"
-
   my-workflow:
     adapter: custom                # User-defined command
     entry_command: |
@@ -41,7 +37,7 @@ defaults:
   timeout_multiplier: 3            # Timeout = estimated_minutes * this multiplier
 
   # Planned for P2+:
-  # model: "claude-sonnet-4-20250514"
+  # model: "claude-sonnet-4-20250514"  # (illustrative; update to current model names)
   # cost_budget:
   #   tier1: 0.50
   #   tier2: 1.00
@@ -50,8 +46,8 @@ defaults:
 
 # LLM Judge settings (planned for P3+)
 # judge:
-#   model: "claude-sonnet-4-20250514"
-#   ensemble_model: "gpt-4o"
+#   model: "claude-sonnet-4-20250514"  # (illustrative; update to current model names)
+#   ensemble_model: "gpt-4o"  # (illustrative; update to current model names)
 #   pairwise_mode: "compact"       # compact | full
 #   enable_ensemble: false
 
@@ -73,7 +69,6 @@ Map of workflow name to configuration. Each entry defines a named workflow that 
 
 Currently available adapters:
 - `vanilla` -- Runs `claude -p` directly with the plan content
-- `v4-claude` -- Runs `claude --agent manager` for multi-agent workflows
 - `custom` -- User-defined command execution (see below)
 
 ### defaults
@@ -102,8 +97,8 @@ LLM Judge configuration for code quality scoring.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | string | `claude-sonnet-4-20250514` | Model for Rubric and Pairwise evaluation |
-| `ensemble_model` | string | `gpt-4o` | Second model for ensemble evaluation |
+| `model` | string | `claude-sonnet-4-20250514` | Model for Rubric and Pairwise evaluation (illustrative; update to current model names) |
+| `ensemble_model` | string | `gpt-4o` | Second model for ensemble evaluation (illustrative; update to current model names) |
 | `pairwise_mode` | string | `compact` | `compact` (14 calls) or `full` (up to 50 calls) |
 | `enable_ensemble` | bool | false | Enable multi-model ensemble for T3-T4 tasks |
 
@@ -128,10 +123,9 @@ Config values are merged with defaults: if your config only specifies `workflows
 | Adapter | Use When | Example |
 |---------|----------|---------|
 | `vanilla` | Baseline testing with direct Claude CLI | `claude -p` with plan content |
-| `v4-claude` | Multi-agent workflows with manager orchestration | `claude --agent manager` |
 | `custom` | Any other tool, wrapper script, or custom configuration | Aider, Cursor, custom scripts |
 
-Use `vanilla` as the baseline, then compare against `v4-claude` or `custom` workflows.
+Use `vanilla` as the baseline, then compare against `custom` workflows.
 
 ## Custom Adapter
 

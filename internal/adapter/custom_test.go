@@ -106,7 +106,7 @@ func TestCustomAdapter_Name(t *testing.T) {
 func TestCustomAdapter_Setup_RunsCommands(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: "echo hello",
 		setupCommands: []string{
 			"mkdir -p subdir1",
@@ -128,7 +128,7 @@ func TestCustomAdapter_Setup_RunsCommands(t *testing.T) {
 func TestCustomAdapter_Setup_NoCommands(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:         "test",
+		name:          "test",
 		entryCommand:  "echo hello",
 		setupCommands: nil,
 	}
@@ -141,7 +141,7 @@ func TestCustomAdapter_Setup_NoCommands(t *testing.T) {
 func TestCustomAdapter_Setup_FailingCommand(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: "echo hello",
 		setupCommands: []string{
 			"false", // always fails
@@ -160,7 +160,7 @@ func TestCustomAdapter_Setup_FailingCommand(t *testing.T) {
 func TestCustomAdapter_Setup_StopsOnFirstFailure(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: "echo hello",
 		setupCommands: []string{
 			"false",                  // fails
@@ -184,7 +184,7 @@ func TestCustomAdapter_Run_EnvironmentVariables(t *testing.T) {
 
 	// entry_command writes env vars to a file so we can inspect them.
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `env | grep ^BENCH_ > env_output.txt`,
 	}
 
@@ -221,7 +221,7 @@ func TestCustomAdapter_Run_PlanFileContent(t *testing.T) {
 
 	// entry_command copies the plan file to a known location so we can check content.
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `cp "$BENCH_PLAN_FILE" plan_copy.md`,
 	}
 
@@ -243,7 +243,7 @@ func TestCustomAdapter_Run_PlanFileContent(t *testing.T) {
 func TestCustomAdapter_Run_CapturesStdout(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `echo "hello from custom"`,
 	}
 
@@ -262,7 +262,7 @@ func TestCustomAdapter_Run_CapturesStdout(t *testing.T) {
 func TestCustomAdapter_Run_NonZeroExit(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `echo "some output" && exit 1`,
 	}
 
@@ -278,7 +278,7 @@ func TestCustomAdapter_Run_NonZeroExit(t *testing.T) {
 func TestCustomAdapter_Run_ParsesJSON(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `echo '{"usage":{"input_tokens":100,"output_tokens":50},"tool_uses":5}'`,
 	}
 
@@ -303,7 +303,7 @@ func TestCustomAdapter_Run_ParsesJSON(t *testing.T) {
 func TestCustomAdapter_Run_NoJSON(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `echo "not json"`,
 	}
 
@@ -319,7 +319,7 @@ func TestCustomAdapter_Run_NoJSON(t *testing.T) {
 func TestCustomAdapter_Run_WorksInWorktreeDir(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `pwd`,
 	}
 
@@ -340,7 +340,7 @@ func TestCustomAdapter_Run_WorksInWorktreeDir(t *testing.T) {
 func TestCustomAdapter_Run_CleansPlanFile(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `echo ok`,
 	}
 
@@ -359,7 +359,7 @@ func TestCustomAdapter_Run_CleansPlanFile(t *testing.T) {
 func TestCustomAdapter_Run_WallTime(t *testing.T) {
 	dir := t.TempDir()
 	a := &CustomAdapter{
-		name:        "test",
+		name:         "test",
 		entryCommand: `echo ok`,
 	}
 

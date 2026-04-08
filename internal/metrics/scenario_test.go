@@ -54,10 +54,10 @@ func TestScenario_Correctness_ExtremelyHighLintIssues(t *testing.T) {
 
 func TestScenario_Correctness_MassiveVTDeduction(t *testing.T) {
 	got := CalculateCorrectness(CorrectnessInput{
-		L1Build:             true,
-		L2Passed:            8, L2Total: 8,
-		L3Issues:            0,
-		L4Passed:            5, L4Total: 5,
+		L1Build:  true,
+		L2Passed: 8, L2Total: 8,
+		L3Issues: 0,
+		L4Passed: 5, L4Total: 5,
 		CriticalVTFailCount: 100,
 	})
 	// 1.0 - 10.0 = -9.0, clamped to 0.0

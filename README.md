@@ -2,6 +2,8 @@ English | [中文](README.zh-CN.md)
 
 # workflow-bench
 
+[![CI](https://github.com/calmkart/ai-coding-workflow-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/calmkart/ai-coding-workflow-bench/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A benchmark tool for evaluating multi-agent coding workflow strategies. Given the same plan, different workflows produce different code -- workflow-bench measures which one does it better.
 
 ## Features
@@ -23,11 +25,17 @@ A benchmark tool for evaluating multi-agent coding workflow strategies. Given th
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) installed and configured
 - `ANTHROPIC_API_KEY` environment variable set
 
-### Build and Run
+### Install
 
 ```bash
-git clone https://github.com/calmp/workflow-bench.git
-cd workflow-bench
+go install github.com/calmkart/ai-coding-workflow-bench/cmd/workflow-bench@latest
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/calmkart/ai-coding-workflow-bench.git
+cd ai-coding-workflow-bench
 
 # Build the binary
 go build -o workflow-bench ./cmd/workflow-bench
@@ -40,9 +48,6 @@ go build -o workflow-bench ./cmd/workflow-bench
 
 # Run a benchmark (vanilla: Claude CLI direct)
 ./workflow-bench run --workflow vanilla --tasks tier1 --runs 1 --tag my-first-run
-
-# Run with v4-claude (multi-agent workflow via --agent manager)
-./workflow-bench run --workflow v4-claude --tasks tier1 --runs 1 --tag v4-run
 
 # View results
 ./workflow-bench report --tag my-first-run
@@ -65,7 +70,6 @@ workflow-bench/
 │   ├── adapter/
 │   │   ├── adapter.go      Adapter interface + registry
 │   │   ├── vanilla.go      Claude CLI direct execution
-│   │   ├── v4claude.go     Claude CLI with --agent manager
 │   │   └── custom.go       User-defined command execution
 │   ├── metrics/
 │   │   └── correctness.go  Correctness score formula
@@ -177,22 +181,19 @@ Config lives at `~/.claude/workflow-bench/bench.yaml` (created by `init`).
 workflows:
   vanilla:
     adapter: vanilla
-  v4-claude:
-    adapter: v4-claude
-    agents_dir: "~/.claude/agents"
-  my-workflow:                     # Custom adapter example
-    adapter: custom
-    entry_command: |
-      claude -p "$BENCH_PLAN_PROMPT" --output-format json
-    setup_commands:
-      - "cp -r ~/my-agents/ .claude/agents/"
+  # my-workflow:                   # Custom adapter example
+  #   adapter: custom
+  #   entry_command: |
+  #     claude -p "$BENCH_PLAN_PROMPT" --output-format json
+  #   setup_commands:
+  #     - "cp -r ~/my-agents/ .claude/agents/"
 
 defaults:
   runs_per_task: 3
   timeout_multiplier: 3
 ```
 
-See [docs/configuration.md](docs/configuration.md) for full field reference including all 3 adapters (`vanilla`, `v4-claude`, `custom`).
+See [docs/configuration.md](docs/configuration.md) for full field reference including both adapters (`vanilla`, `custom`).
 
 ## Development
 
@@ -240,7 +241,7 @@ See [docs/development.md](docs/development.md) for the full development guide.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | **P1** | CLI, vanilla adapter, SQLite, L1-L4 verify, reports | Done |
-| **P2** | v4-claude adapter, custom adapter, 100 tasks (T1-T4) | Done |
+| **P2** | Custom adapter, 100 tasks (T1-T4) | Done |
 | **P3** | Comparison reports, LLM Judge (Rubric scoring via Anthropic API) | Planned |
 | **P4** | Pairwise comparison, Bradley-Terry ranking, calibration samples | Planned |
 | **P5** | Git history importer: scan, group, evaluate, generate plans | Planned |
@@ -249,4 +250,4 @@ See [docs/development.md](docs/development.md) for the full development guide.
 
 ## License
 
-TBD
+MIT

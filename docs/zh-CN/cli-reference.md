@@ -19,7 +19,7 @@
 
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--workflow` | string | `vanilla` | Workflow adapter：`vanilla`、`v4-claude` 或自定义名称 |
+| `--workflow` | string | `vanilla` | Workflow adapter：`vanilla` 或自定义名称 |
 | `--tasks` | string | *（必填）* | 任务选择器：`tier1`、`tier1/fix-handler-bug` 或 `all` |
 | `--tag` | string | *（必填）* | 标记本次运行的 tag |
 | `--runs` | int | 取配置值（默认 3） | 每个任务的运行次数 |
@@ -31,9 +31,6 @@
 ```bash
 # 用 vanilla workflow 运行所有 tier 1 任务
 workflow-bench run --workflow vanilla --tasks tier1 --runs 3 --tag baseline
-
-# 用 v4-claude 多智能体工作流运行
-workflow-bench run --workflow v4-claude --tasks tier1 --runs 3 --tag v4-test
 
 # 用自定义 workflow 运行（在 bench.yaml 中定义）
 workflow-bench run --workflow my-workflow --tasks tier1 --runs 1 --tag custom-test
@@ -129,7 +126,6 @@ workflow-bench list workflows
 ```
 Available workflows:
   vanilla    - Claude CLI direct execution
-  v4-claude  - Claude CLI multi-agent (--agent manager)
   custom     - User-defined command execution
 ```
 
@@ -152,7 +148,7 @@ workflow-bench list tags
 ```
 TAG                       RUNS   DATE                 WORKFLOW
 baseline                  6      2026-03-30 14:00     vanilla
-v4-test                   3      2026-03-31 10:30     vanilla
+experiment-1                   3      2026-03-31 10:30     vanilla
 ```
 
 ---

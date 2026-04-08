@@ -1,6 +1,4 @@
 // Package store provides SQLite persistence for benchmark runs.
-//
-// Spec: .planning/workflow-bench.md (section 5.4)
 package store
 
 import (
@@ -30,12 +28,12 @@ type Run struct {
 	FinishedAt *time.Time
 
 	// Correctness
-	L1Build         *bool
-	L2UtPassed      *int
-	L2UtTotal       *int
-	L3LintIssues    *int
-	L4E2EPassed     *int
-	L4E2ETotal      *int
+	L1Build          *bool
+	L2UtPassed       *int
+	L2UtTotal        *int
+	L3LintIssues     *int
+	L4E2EPassed      *int
+	L4E2ETotal       *int
 	CorrectnessScore *float64
 
 	// Efficiency

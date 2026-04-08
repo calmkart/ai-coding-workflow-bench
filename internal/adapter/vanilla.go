@@ -1,6 +1,4 @@
 // Package adapter — vanilla adapter implementation.
-//
-// Spec: .planning/workflow-bench-appendix.md (section A.2)
 package adapter
 
 import (

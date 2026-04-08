@@ -9,13 +9,13 @@ import (
 
 // VerifyResult holds the parsed output of a verify run.
 type VerifyResult struct {
-	L1Build    bool
-	L2Passed   int
-	L2Total    int
-	L3Issues   int
-	L4Passed   int
-	L4Total    int
-	RawOutput  string
+	L1Build   bool
+	L2Passed  int
+	L2Total   int
+	L3Issues  int
+	L4Passed  int
+	L4Total   int
+	RawOutput string
 }
 
 // benchResultRe matches "BENCH_RESULT: L1=... L2=... L3=... L4=..."

@@ -1,6 +1,4 @@
 // Package report generates benchmark reports from stored results.
-//
-// Spec: .planning/workflow-bench.md, appendix C.1
 package report
 
 import (
@@ -10,7 +8,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/calmp/workflow-bench/internal/store"
+	"github.com/calmkart/ai-coding-workflow-bench/internal/store"
 )
 
 //go:embed templates/summary.md.tmpl

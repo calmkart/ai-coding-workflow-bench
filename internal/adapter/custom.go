@@ -1,6 +1,4 @@
 // Package adapter — custom adapter implementation.
-//
-// Spec: .planning/workflow-bench-appendix.md (section A.4)
 package adapter
 
 import (
@@ -20,7 +18,7 @@ import (
 //
 // @implements REQ-ADAPTER-CUSTOM (custom adapter: user-defined command execution via bench.yaml)
 type CustomAdapter struct {
-	name         string   // workflow name
+	name          string   // workflow name
 	entryCommand  string   // main execution command (run via bash -c)
 	setupCommands []string // preparation commands (run in worktree before entry_command)
 }
@@ -69,7 +67,7 @@ func NewCustom(cfg map[string]any) (Adapter, error) {
 	}
 
 	return &CustomAdapter{
-		name:         name,
+		name:          name,
 		entryCommand:  entryCmd,
 		setupCommands: setupCmds,
 	}, nil

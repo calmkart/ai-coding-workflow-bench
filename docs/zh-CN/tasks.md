@@ -181,13 +181,23 @@ workflow-bench validate --tasks tier2/my-new-task -v
 
 使用 `controller-runtime` 的 Kubernetes operator。E2E 测试使用 `envtest`（真实 apiserver + etcd）。通过 `metadata.envtest_k8s_version` 指定 K8s 版本。
 
-### library（计划中）
+> **注意：** `reconciler` 类型已涵盖不依赖 controller-runtime 的 Kubernetes 风格 operator 模式。此类型预留给将来使用 envtest 和真正 controller-runtime 的任务。
+
+### library
 
 Go 库包。E2E 测试直接导入并调用该包。
 
-### cli（计划中）
+### cli
 
 命令行工具。E2E 测试执行二进制文件并检查输出。
+
+### concurrency
+
+涉及 goroutine、channel、worker pool 和并发数据结构的任务。使用通用验证模板（build + test + vet + E2E）。
+
+### reconciler
+
+模拟 Kubernetes 风格的 reconciliation 循环：状态机、finalizer、owner reference、leader election。使用通用验证模板（build + test + vet + E2E）。
 
 ## 难度等级指南
 

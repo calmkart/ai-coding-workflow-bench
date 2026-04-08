@@ -1,6 +1,4 @@
 // Package config loads and merges bench.yaml configuration.
-//
-// Spec: .planning/workflow-bench.md
 package config
 
 import (
@@ -29,7 +27,6 @@ type Config struct {
 // WorkflowConfig defines a workflow adapter and its settings.
 type WorkflowConfig struct {
 	Adapter       string   `yaml:"adapter"`
-	AgentsDir     string   `yaml:"agents_dir,omitempty"`
 	EntryCommand  string   `yaml:"entry_command,omitempty"`
 	SetupCommands []string `yaml:"setup_commands,omitempty"`
 }
@@ -38,9 +35,6 @@ type WorkflowConfig struct {
 func (wc WorkflowConfig) ToMap() map[string]any {
 	m := map[string]any{
 		"adapter": wc.Adapter,
-	}
-	if wc.AgentsDir != "" {
-		m["agents_dir"] = wc.AgentsDir
 	}
 	if wc.EntryCommand != "" {
 		m["entry_command"] = wc.EntryCommand
@@ -72,8 +66,7 @@ type TaskMeta struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Workflows: map[string]WorkflowConfig{
-			"vanilla":   {Adapter: "vanilla"},
-			"v4-claude": {Adapter: "v4-claude", AgentsDir: "~/.claude/agents"},
+			"vanilla": {Adapter: "vanilla"},
 		},
 		Defaults: Defaults{
 			RunsPerTask:       3,

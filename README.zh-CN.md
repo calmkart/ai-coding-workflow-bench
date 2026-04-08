@@ -2,6 +2,8 @@
 
 # workflow-bench
 
+[![CI](https://github.com/calmkart/ai-coding-workflow-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/calmkart/ai-coding-workflow-bench/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 多智能体编码工作流的基准测试工具。给定相同的计划，不同的工作流会产出不同的代码——workflow-bench 衡量哪种工作流做得更好。
 
 ## 特性
@@ -23,11 +25,17 @@
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) 已安装并配置
 - 设置 `ANTHROPIC_API_KEY` 环境变量
 
-### 构建和运行
+### 安装
 
 ```bash
-git clone https://github.com/calmp/workflow-bench.git
-cd workflow-bench
+go install github.com/calmkart/ai-coding-workflow-bench/cmd/workflow-bench@latest
+```
+
+### 从源码构建
+
+```bash
+git clone https://github.com/calmkart/ai-coding-workflow-bench.git
+cd ai-coding-workflow-bench
 
 # 构建
 go build -o workflow-bench ./cmd/workflow-bench
@@ -40,9 +48,6 @@ go build -o workflow-bench ./cmd/workflow-bench
 
 # 运行基准测试（vanilla：直接调用 Claude CLI）
 ./workflow-bench run --workflow vanilla --tasks tier1 --runs 1 --tag my-first-run
-
-# 运行 v4-claude（多智能体工作流，通过 --agent manager）
-./workflow-bench run --workflow v4-claude --tasks tier1 --runs 1 --tag v4-run
 
 # 查看结果
 ./workflow-bench report --tag my-first-run
@@ -65,7 +70,6 @@ workflow-bench/
 │   ├── adapter/
 │   │   ├── adapter.go      Adapter 接口 + 注册表
 │   │   ├── vanilla.go      Claude CLI 直接执行
-│   │   ├── v4claude.go     Claude CLI --agent manager 多智能体工作流
 │   │   └── custom.go       用户自定义命令执行
 │   ├── metrics/
 │   │   └── correctness.go  正确性评分公式
@@ -177,22 +181,19 @@ else:
 workflows:
   vanilla:
     adapter: vanilla
-  v4-claude:
-    adapter: v4-claude
-    agents_dir: "~/.claude/agents"
-  my-workflow:                     # Custom adapter 示例
-    adapter: custom
-    entry_command: |
-      claude -p "$BENCH_PLAN_PROMPT" --output-format json
-    setup_commands:
-      - "cp -r ~/my-agents/ .claude/agents/"
+  # my-workflow:                   # Custom adapter 示例
+  #   adapter: custom
+  #   entry_command: |
+  #     claude -p "$BENCH_PLAN_PROMPT" --output-format json
+  #   setup_commands:
+  #     - "cp -r ~/my-agents/ .claude/agents/"
 
 defaults:
   runs_per_task: 3
   timeout_multiplier: 3
 ```
 
-完整配置参考见 [docs/zh-CN/configuration.md](docs/zh-CN/configuration.md)，包含全部 3 种 adapter（`vanilla`、`v4-claude`、`custom`）的详细说明。
+完整配置参考见 [docs/zh-CN/configuration.md](docs/zh-CN/configuration.md)，包含两种 adapter（`vanilla`、`custom`）的详细说明。
 
 ## 开发
 
@@ -240,7 +241,7 @@ workflows:
 | 阶段 | 范围 | 状态 |
 |------|------|------|
 | **P1** | CLI、vanilla adapter、SQLite、L1-L4 验证、报告 | 已完成 |
-| **P2** | v4-claude adapter、custom adapter、100 个任务（T1-T4） | 已完成 |
+| **P2** | Custom adapter、100 个任务（T1-T4） | 已完成 |
 | **P3** | 对比报告、LLM Judge（基于 Anthropic API 的 Rubric 评分） | 计划中 |
 | **P4** | 成对比较、Bradley-Terry 排名、校准样本 | 计划中 |
 | **P5** | Git 历史导入：扫描、分组、评估、生成计划 | 计划中 |
@@ -249,4 +250,4 @@ workflows:
 
 ## 许可证
 
-TBD
+MIT

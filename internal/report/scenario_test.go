@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/calmp/workflow-bench/internal/store"
+	"github.com/calmkart/ai-coding-workflow-bench/internal/store"
 )
 
 // --- Basic Report: Two completed runs ---

@@ -1,6 +1,4 @@
 // Package adapter defines the interface for workflow adapters and a registry.
-//
-// Spec: .planning/workflow-bench.md, appendix A.1
 package adapter
 
 import (
@@ -44,10 +42,10 @@ type Adapter interface {
 }
 
 // Registry maps adapter names to constructor functions.
+// It must only be modified during package initialization (init functions), not at runtime.
 var Registry = map[string]func(cfg map[string]any) (Adapter, error){
-	"vanilla":   NewVanilla,
-	"v4-claude": NewV4Claude,
-	"custom":    NewCustom,
+	"vanilla": NewVanilla,
+	"custom":  NewCustom,
 }
 
 // Get returns an adapter by name from the registry.

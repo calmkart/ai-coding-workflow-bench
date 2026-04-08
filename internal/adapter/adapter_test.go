@@ -115,19 +115,10 @@ func TestResolveAdapterName_CustomWorkflow(t *testing.T) {
 // TestResolveAdapterName_BuiltinWorkflow verifies that built-in workflow names
 // (like "vanilla") work without needing adapter field resolution.
 func TestResolveAdapterName_BuiltinWorkflow(t *testing.T) {
-	// For built-in workflows, WorkflowCfg may be nil or may have adapter matching the name.
-	adapterName := "vanilla"
-	var workflowCfg map[string]any // nil
-
-	if workflowCfg != nil {
-		if a, ok := workflowCfg["adapter"].(string); ok && a != "" {
-			adapterName = a
-		}
-	}
-
-	adpt, err := Get(adapterName, workflowCfg)
+	// For built-in workflows, WorkflowCfg may be nil.
+	adpt, err := Get("vanilla", nil)
 	if err != nil {
-		t.Fatalf("Get(%q) failed: %v", adapterName, err)
+		t.Fatalf("Get(%q) failed: %v", "vanilla", err)
 	}
 	if adpt.Name() != "vanilla" {
 		t.Errorf("expected adapter name 'vanilla', got %q", adpt.Name())

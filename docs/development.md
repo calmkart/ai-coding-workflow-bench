@@ -26,7 +26,6 @@ internal/
   adapter/
     adapter.go                   Adapter interface, RunOutput type, registry
     vanilla.go                   VanillaAdapter: runs `claude -p` with the plan
-    v4claude.go                  V4ClaudeAdapter: runs `claude --agent manager`
     custom.go                    CustomAdapter: user-defined command execution
   metrics/
     correctness.go               Correctness score calculation (weighted L1-L4)
@@ -180,7 +179,7 @@ workflows:
 
 ## Adding a New Task Type
 
-Currently only `http-server` is supported. To add a new type:
+All task types currently use the same generic verify template. To add a type-specific template:
 
 1. Create a verify template at `internal/engine/templates/<type>.sh.tmpl`
 2. Embed it in `verify.go`:

@@ -26,7 +26,6 @@ internal/
   adapter/
     adapter.go                   Adapter 接口、RunOutput 类型、注册表
     vanilla.go                   VanillaAdapter：使用计划运行 `claude -p`
-    v4claude.go                  V4ClaudeAdapter：运行 `claude --agent manager`
     custom.go                    CustomAdapter：用户自定义命令执行
   metrics/
     correctness.go               正确性评分计算（加权 L1-L4）
@@ -180,7 +179,7 @@ workflows:
 
 ## 添加新任务类型
 
-目前仅支持 `http-server`。添加新类型的步骤：
+所有任务类型目前使用相同的通用验证模板。添加特定类型模板的步骤：
 
 1. 在 `internal/engine/templates/<type>.sh.tmpl` 创建验证模板
 2. 在 `verify.go` 中嵌入：

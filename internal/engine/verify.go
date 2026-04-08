@@ -3,7 +3,6 @@ package engine
 import (
 	_ "embed"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,15 +30,7 @@ func GenerateVerifyDir(cfg VerifyConfig) (string, error) {
 	}
 
 	// Generate verify.sh from template.
-	var tmplStr string
-	switch cfg.TaskType {
-	case "http-server":
-		tmplStr = httpServerTemplate
-	default:
-		// All task types use the same generic verify template (build + test + vet + e2e)
-		slog.Info("using generic verify template", "type", cfg.TaskType)
-		tmplStr = httpServerTemplate
-	}
+	tmplStr := httpServerTemplate
 	tmpl, err := template.New("verify").Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("parse verify template: %w", err)

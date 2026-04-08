@@ -9,15 +9,15 @@ import (
 
 func TestParseVerifyOutput(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantL1   bool
-		wantL2P  int
-		wantL2T  int
-		wantL3   int
-		wantL4P  int
-		wantL4T  int
-		wantErr  bool
+		name    string
+		input   string
+		wantL1  bool
+		wantL2P int
+		wantL2T int
+		wantL3  int
+		wantL4P int
+		wantL4T int
+		wantErr bool
 	}{
 		{
 			name:    "all pass",

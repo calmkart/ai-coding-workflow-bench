@@ -19,7 +19,7 @@
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--workflow` | string | `vanilla` | Workflow adapter: `vanilla`, `v4-claude`, or custom name |
+| `--workflow` | string | `vanilla` | Workflow adapter: `vanilla` or custom name |
 | `--tasks` | string | *(required)* | Task selector: `tier1`, `tier1/fix-handler-bug`, or `all` |
 | `--tag` | string | *(required)* | Tag to label this benchmark run |
 | `--runs` | int | from config (default 3) | Number of runs per task |
@@ -31,9 +31,6 @@
 ```bash
 # Run all tier 1 tasks with vanilla workflow
 workflow-bench run --workflow vanilla --tasks tier1 --runs 3 --tag baseline
-
-# Run with v4-claude multi-agent workflow
-workflow-bench run --workflow v4-claude --tasks tier1 --runs 3 --tag v4-test
 
 # Run with a custom workflow (defined in bench.yaml)
 workflow-bench run --workflow my-workflow --tasks tier1 --runs 1 --tag custom-test
@@ -129,7 +126,6 @@ workflow-bench list workflows
 ```
 Available workflows:
   vanilla    - Claude CLI direct execution
-  v4-claude  - Claude CLI multi-agent (--agent manager)
   custom     - User-defined command execution
 ```
 
@@ -152,7 +148,7 @@ workflow-bench list tags
 ```
 TAG                       RUNS   DATE                 WORKFLOW
 baseline                  6      2026-03-30 14:00     vanilla
-v4-test                   3      2026-03-31 10:30     vanilla
+experiment-1                   3      2026-03-31 10:30     vanilla
 ```
 
 ---
