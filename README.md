@@ -21,7 +21,7 @@ A benchmark tool for evaluating multi-agent coding workflow strategies. Given th
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.23+
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) installed and configured
 - `ANTHROPIC_API_KEY` environment variable set
 

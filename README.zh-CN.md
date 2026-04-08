@@ -21,7 +21,7 @@
 
 ### 前置条件
 
-- Go 1.22+
+- Go 1.23+
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) 已安装并配置
 - 设置 `ANTHROPIC_API_KEY` 环境变量
 

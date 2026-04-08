@@ -21,7 +21,7 @@ make check
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.23+
 - git
 - (Optional) [staticcheck](https://staticcheck.dev/) for linting: `go install honnef.co/go/tools/cmd/staticcheck@latest`
 

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.23+
 - git
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli) (for running benchmarks, not needed for development)
 

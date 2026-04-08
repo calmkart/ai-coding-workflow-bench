@@ -2,7 +2,7 @@
 
 ## 前置条件
 
-- Go 1.22+
+- Go 1.23+
 - git
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-cli)（运行基准测试时需要，开发本身不需要）
 
