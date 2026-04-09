@@ -2,7 +2,12 @@
 
 ## 概述
 
-workflow-bench 采用多层评分系统。当前阶段（P1）仅实现了正确性评分。后续阶段将添加效率、代码质量（LLM Judge）和稳定性评分，最终合成综合分数。
+workflow-bench 采用四维复合评分系统：
+
+1. **正确性** (40%) -- 确定性 L1-L4 验证
+2. **效率** (25%) -- Token 使用量和成本
+3. **质量** (25%) -- LLM Judge Rubric 评分（7 个维度）
+4. **稳定性** (10%) -- 多次运行的一致性
 
 ## 四层验证 (L1-L4)
 
@@ -14,15 +19,15 @@ workflow-bench 采用多层评分系统。当前阶段（P1）仅实现了正确
 go build ./...
 ```
 
-二进制门控。代码无法编译则 correctness = 0.0，不再执行后续检查。
+二进制门控。代码不能编译则 correctness = 0.0，后续检查不再运行。
 
 ### L2：单元测试
 
 ```bash
-go test ./... -count=1 -race -v
+go test -json ./... -count=1 -race
 ```
 
-运行任务自带的单元测试并启用竞态检测器，统计通过和失败的测试数。
+使用竞态检测器运行任务的单元测试。使用 `go test -json` 精确计数（仅计算顶层测试函数，过滤子测试）。
 
 ### L3：静态分析
 
@@ -32,138 +37,123 @@ staticcheck ./...   # 如已安装
 gosec ./...          # 如已安装
 ```
 
-统计 lint 问题数。每个问题扣除 L3 子分数的 5%。仅 `go vet` 为必需；`staticcheck` 和 `gosec` 在可用时使用。
+统计 lint 问题数。每个问题从 L3 子分数中扣除 5%。
 
 ### L4：端到端测试
 
 ```bash
-go test -v -run TestBenchE2E -count=1 -race ./...
+go test -json -run TestBenchE2E -count=1 -race ./...
 ```
 
-运行任务 `verify/` 目录中的 E2E 测试（真值）。workflow 智能体看不到这些测试——它们仅在验证阶段被复制到 worktree 中。
+运行任务 `verify/` 目录中的 E2E 测试。这些测试对工作流代理不可见，仅在验证阶段复制到 worktree。
 
-对于 `http-server` 类型任务，E2E 测试使用 `httptest` 并调用 `setupRouter()` 来测试 API。
-
-## 正确性评分公式
-
-正确性分数是 L2、L3、L4 结果的加权组合，以 L1 为门控：
+## 正确性公式
 
 ```
 if L1 == FAIL:
     correctness = 0.0
 else:
-    l2_score = ut_passed / ut_total         # 0.0-1.0
-    l3_score = max(0, 1.0 - issues * 0.05)  # 每个问题扣 5%
-    l4_score = e2e_passed / e2e_total       # 0.0-1.0
-
-    correctness = 0.20 * l2_score + 0.10 * l3_score + 0.70 * l4_score
+    l2 = passed / total
+    l3 = max(0, 1.0 - issues * 0.05)
+    l4 = passed / total
+    correctness = 0.20 * l2 + 0.10 * l3 + 0.70 * l4
 ```
 
-**边界情况**：
-- `ut_total == 0`（无单元测试）时，`l2_score = 1.0`
-- `e2e_total == 0`（无 E2E 测试）时，`l4_score = 1.0`
+### VT 扣分
 
-### 计算示例
-
-**满分运行**：L1=PASS, L2=8/8, L3=0 个问题, L4=5/5
-
-```
-l2 = 8/8 = 1.0
-l3 = max(0, 1.0 - 0*0.05) = 1.0
-l4 = 5/5 = 1.0
-correctness = 0.20*1.0 + 0.10*1.0 + 0.70*1.0 = 1.00
-```
-
-**部分通过**：L1=PASS, L2=6/8, L3=2 个问题, L4=3/5
-
-```
-l2 = 6/8 = 0.75
-l3 = max(0, 1.0 - 2*0.05) = 0.90
-l4 = 3/5 = 0.60
-correctness = 0.20*0.75 + 0.10*0.90 + 0.70*0.60 = 0.15 + 0.09 + 0.42 = 0.66
-```
-
-**构建失败**：L1=FAIL
-
-```
-correctness = 0.0
-```
-
-## Verification Target (VT)
-
-任务可定义 verification target——智能体在重构过程中可能引入的已知陷阱。VT 横跨 9 个类别（共定义 78 种模式）：
-
-| 类别 | 示例 |
-|------|------|
-| Concurrency | goroutine 泄漏、数据竞争、死锁 |
-| Error handling | 错误吞没、nil interface 陷阱 |
-| Memory/Resources | 未关闭 HTTP body、文件描述符泄漏 |
-| Interface/Types | nil interface 陷阱、type assertion panic |
-| Package/Dependencies | 循环导入、init() 顺序依赖 |
-| HTTP | 缺少 server timeout、handler panic 恢复 |
-| Distributed | 无退避重试、非幂等重试 |
-| K8s Operator | 无限 reconcile、finalizer 未清理 |
-| Testing | 测试污染、时间依赖测试 |
-
-### VT 扣分（计划中）
-
-VT 检测实现后，关键 VT 失败会从正确性分数中扣除：
+关键 VT（Verification Target）失败会额外扣分：
 
 ```
 correctness = max(0, correctness - 0.1 * critical_vt_fail_count)
 ```
 
-每个关键 VT 失败扣 0.1 分（10%），下限为 0。
+支持的检测类型：`go build`、`unit test`、`e2e test case`、`go vet`、`race detector` 等。
 
-## 通过/失败判定
-
-运行被判定为"通过"的条件：
-- L1 构建成功 **且**
-- 所有 L4 E2E 测试通过（L4 passed == L4 total，且 total > 0）
-
-该结果用于报告中的通过率指标。
-
-## 未来评分维度（P2+）
-
-### 效率评分
+## 效率评分
 
 ```
 efficiency = 1.0 - min(1.0, cost_usd / cost_budget)
 ```
 
-其中 `cost_budget` 按等级设定（T1=$0.50, T2=$1.00, T3=$2.00, T4=$5.00）。如无 token 数据，效率评分为 N/A 并从综合分数中排除。
+成本预算按难度等级设定（T1=$0.50，T2=$1.00，T3=$2.00，T4=$5.00）。成本使用统一的 `metrics.EstimateCost()` 函数计算，支持可配置的模型定价。
 
-### LLM 质量评分
+## LLM Judge -- Rubric 评分
 
-由 LLM Judge 通过 Rubric 评估的六个维度（每维度 0-5 分）：
+配置 `judge.enabled: true` 后，每个完成的运行会由 LLM Judge 使用结构化 Rubric 评估。七个维度按 0-5 分评分：
 
 | 维度 | 权重 | 评估内容 |
-|------|------|----------|
-| Correctness | 25% | 逻辑正确性、边界情况、隐藏缺陷 |
+|------|------|---------|
+| Correctness | 25% | 逻辑正确性、边界情况、隐藏 bug |
 | Readability | 15% | 命名、结构、注释、控制流 |
-| Simplicity | 15% | 无过度工程、最简可用方案 |
+| Simplicity | 15% | 不过度工程化、最简可行方案 |
 | Robustness | 15% | 错误处理、资源管理、并发安全 |
-| Minimality | 15% | 干净的 diff、无无关变更、范围合理 |
-| Maintainability | 15% | 内聚性、耦合度、可扩展性、模式一致性 |
+| Minimality | 15% | 干净 diff、无无关修改 |
+| Maintainability | 15% | 内聚、耦合、可扩展性 |
+| Go Idioms | 补充 | Go 语言风格一致性 |
 
-另有两个补充维度单独报告：
-- **Go Idioms**：Go 语言风格一致性
-- **Workflow Private**：计划遵循度（根据计划内容动态生成）
+### 一致性验证
 
-### 稳定性评分
+Judge 响应中包含布尔指标和数值评分。一致性检查会标记矛盾情况（如 5/6 布尔指标为正但分数为 2）。
+
+### Judge 配置
+
+```yaml
+judge:
+  enabled: true
+  model: "claude-sonnet-4-20250514"
+  input_price_per_mtok: 3.0
+  output_price_per_mtok: 15.0
+  repeat: 1
+```
+
+## 成对比较（Pairwise）
+
+使用 `compare --pairwise` 时，LLM Judge 对两个 tag 的代码进行头对头比较：
+
+1. 两个实现的 diff 同时提交给 Judge
+2. Judge 在多个维度上评估
+3. **位置偏差检测**：比较运行两次（交换顺序），标记结果是否一致
+
+结果存储在 `pairwise_results` 表中。
+
+## 稳定性评分
 
 ```
 stability = pass_count / K
 ```
 
-其中 K 为 `runs_per_task`（K >= 3 才有意义）。
+K 为 `runs_per_task`（需要 K >= 3 才有意义）。衡量工作流在多次运行中产出正确结果的一致性。
 
-### 综合评分
+## 复合评分（四维）
 
 ```
 final = 0.40 * correctness + 0.25 * efficiency + 0.25 * quality + 0.10 * stability
 ```
 
-当某维度为 N/A 时，其权重按比例重新分配给其余维度。
+缺失维度的权重按比例重分配。
 
-**安全否决**：如果 `gosec` 发现 High/Critical 问题，运行标记为 `SECURITY_FAIL`（单独报告，不影响数值评分）。
+## 统计方法
+
+### Wilson Score 置信区间
+
+通过率以 95% Wilson Score 置信区间报告：
+
+```
+Pass Rate: 85.0% [72.3-93.1]
+```
+
+### 显著性检验
+
+对比两个 tag 时，通过检查左右 Wilson CI 是否重叠判断统计显著性。不重叠标记为 `*`。
+
+### 低样本量警告
+
+总运行数 K < 5 时显示警告。
+
+## 通过/失败判定
+
+运行"通过"的条件：L1 构建成功 且 L4 E2E 全部通过。
+
+## 安全否决
+
+`gosec` 发现高/严重问题时，标记 `SECURITY_FAIL`（独立报告，不影响数值分数）。

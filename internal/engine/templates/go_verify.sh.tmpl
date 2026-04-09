@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -uo pipefail
+TASK_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$1"
+cd "$REPO_DIR"
+
+# Fix 4: Use unique temp directory to avoid collisions in concurrent runs.
+TMPDIR=$(mktemp -d /tmp/bench-verify.XXXXXX)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+echo "=== L1: Build ==="
+# Fix 1: L1 build failure should abort with FAIL result; check manually instead of set -e.
+if ! go build ./... 2>&1; then
+  echo "BENCH_RESULT: L1=FAIL"
+  exit 1
+fi
+
+echo "=== L2: Unit Tests ==="
+# P7: Use go test -json for accurate top-level test counting (avoids subtest double-counting).
+go test -json ./... -count=1 -race 2>&1 | tee "$TMPDIR/bench-ut.json" || true
+# Count only top-level tests (Test field does not contain '/') with pass/fail action.
+UT_PASS=$(grep '"Action":"pass"' "$TMPDIR/bench-ut.json" | grep '"Test"' | grep -v '"Test":"[^"]*/' | grep -c '"Test"') || UT_PASS=0
+UT_FAIL=$(grep '"Action":"fail"' "$TMPDIR/bench-ut.json" | grep '"Test"' | grep -v '"Test":"[^"]*/' | grep -c '"Test"') || UT_FAIL=0
+
+# If unit tests exist but pass+fail=0, likely compilation failure
+if [ "$UT_PASS" -eq 0 ] && [ "$UT_FAIL" -eq 0 ]; then
+  # Check if go test output contains build failure indicators
+  if grep -q '"Action":"fail"\|"Output":".*build failed\|"Output":".*does not compile\|"Output":".*undefined:' "$TMPDIR/bench-ut.json" 2>/dev/null; then
+    UT_FAIL=1
+  fi
+fi
+
+echo "=== L3: Static Analysis ==="
+LINT_ISSUES=0
+go vet ./... 2>"$TMPDIR/bench-vet.log"
+LINT_ISSUES=$(grep -cE "^.*\.go:[0-9]+:" "$TMPDIR/bench-vet.log" 2>/dev/null) || LINT_ISSUES=0
+command -v staticcheck >/dev/null 2>&1 && {
+  staticcheck ./... >"$TMPDIR/bench-sc.log" 2>&1
+  SC=$(grep -cE "^.*\.go:[0-9]+:" "$TMPDIR/bench-sc.log" 2>/dev/null) || SC=0
+  LINT_ISSUES=$((LINT_ISSUES + SC))
+}
+command -v gosec >/dev/null 2>&1 && {
+  gosec -fmt=json -out="$TMPDIR/bench-gosec.json" ./... 2>/dev/null
+}
+
+echo "=== L4: E2E ==="
+if [ -f "$TASK_DIR/e2e_test.go" ]; then
+  cp "$TASK_DIR/e2e_test.go" "$REPO_DIR/bench_e2e_test.go"
+  # P7: Use go test -json for E2E tests too.
+  go test -json -run TestBenchE2E -count=1 -race ./... 2>&1 | tee "$TMPDIR/bench-e2e.json" || true
+  E2E_PASS=$(grep '"Action":"pass"' "$TMPDIR/bench-e2e.json" | grep '"Test"' | grep -v '"Test":"[^"]*/' | grep -c '"Test"') || E2E_PASS=0
+  E2E_FAIL=$(grep '"Action":"fail"' "$TMPDIR/bench-e2e.json" | grep '"Test"' | grep -v '"Test":"[^"]*/' | grep -c '"Test"') || E2E_FAIL=0
+
+  # If e2e_test.go exists but no PASS/FAIL lines were found, the test likely
+  # failed to compile (e.g. broken API signatures). Record as 0/1 (one failure)
+  # so correctness.go doesn't treat L4=0/0 as "no E2E tests = perfect score".
+  if [ "$E2E_PASS" -eq 0 ] && [ "$E2E_FAIL" -eq 0 ]; then
+    E2E_FAIL=1
+  fi
+
+  rm -f "$REPO_DIR/bench_e2e_test.go"
+else
+  E2E_PASS=0
+  E2E_FAIL=0
+fi
+
+echo "BENCH_RESULT: L1=PASS L2=${UT_PASS}/$((UT_PASS+UT_FAIL)) L3=${LINT_ISSUES} L4=${E2E_PASS}/$((E2E_PASS+E2E_FAIL))"

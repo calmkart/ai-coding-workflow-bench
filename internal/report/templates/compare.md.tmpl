@@ -1,0 +1,64 @@
+# Comparison: {{ .LeftTag }} vs {{ .RightTag }}
+{{ if .LowSampleWarning }}
+> :warning: {{ .LowSampleWarning }}
+{{ end }}
+## Overall
+
+| Metric | {{ .LeftTag }} | {{ .RightTag }} | Delta |
+|--------|{{ .LeftTagDashes }}|{{ .RightTagDashes }}|-------|
+| Pass Rate | {{ .LeftPassRateCI }} | {{ .RightPassRateCI }} | {{ .DeltaPassRate }} |
+| Avg Correctness | {{ printf "%.2f" .LeftAvgCorrectness }} | {{ printf "%.2f" .RightAvgCorrectness }} | {{ .DeltaCorrectness }} |
+{{- if .HasWallTime }}
+| Avg Wall Time | {{ .LeftAvgWallTime }} | {{ .RightAvgWallTime }} | {{ .DeltaWallTime }} |
+{{- end }}
+{{- if .HasL2Tests }}
+| Avg L2 Tests | {{ printf "%.1f" .LeftAvgL2 }} | {{ printf "%.1f" .RightAvgL2 }} | {{ .DeltaL2 }} |
+{{- end }}
+{{- if .HasTokens }}
+| Avg Tokens | {{ .LeftAvgTokens }} | {{ .RightAvgTokens }} | {{ .DeltaTokens }} |
+| Est. Cost/Task | {{ .LeftAvgCost }} | {{ .RightAvgCost }} | {{ .DeltaCost }} |
+{{- end }}
+
+> `*` = statistically significant (95% Wilson Score CIs do not overlap)
+{{ if .HasRubric }}
+## Code Quality (LLM Judge)
+
+| Dimension | {{ .LeftTag }} | {{ .RightTag }} | Delta |
+|-----------|{{ .LeftTagDashes }}|{{ .RightTagDashes }}|-------|
+| Correctness | {{ printf "%.1f" .LeftRubric.Correctness }}/5 | {{ printf "%.1f" .RightRubric.Correctness }}/5 | {{ printf "%+.1f" (sub .RightRubric.Correctness .LeftRubric.Correctness) }} |
+| Readability | {{ printf "%.1f" .LeftRubric.Readability }}/5 | {{ printf "%.1f" .RightRubric.Readability }}/5 | {{ printf "%+.1f" (sub .RightRubric.Readability .LeftRubric.Readability) }} |
+| Simplicity | {{ printf "%.1f" .LeftRubric.Simplicity }}/5 | {{ printf "%.1f" .RightRubric.Simplicity }}/5 | {{ printf "%+.1f" (sub .RightRubric.Simplicity .LeftRubric.Simplicity) }} |
+| Robustness | {{ printf "%.1f" .LeftRubric.Robustness }}/5 | {{ printf "%.1f" .RightRubric.Robustness }}/5 | {{ printf "%+.1f" (sub .RightRubric.Robustness .LeftRubric.Robustness) }} |
+| Minimality | {{ printf "%.1f" .LeftRubric.Minimality }}/5 | {{ printf "%.1f" .RightRubric.Minimality }}/5 | {{ printf "%+.1f" (sub .RightRubric.Minimality .LeftRubric.Minimality) }} |
+| Maintainability | {{ printf "%.1f" .LeftRubric.Maintainability }}/5 | {{ printf "%.1f" .RightRubric.Maintainability }}/5 | {{ printf "%+.1f" (sub .RightRubric.Maintainability .LeftRubric.Maintainability) }} |
+| **Composite** | **{{ printf "%.1f" .LeftRubric.Composite }}/5** | **{{ printf "%.1f" .RightRubric.Composite }}/5** | **{{ .DeltaComposite }}** |
+{{ end }}
+{{ if .TierComparisons }}
+## Per-Tier Comparison
+
+| Tier | Left Pass Rate | Right Pass Rate | Left Avg Corr | Right Avg Corr | Delta |
+|------|----------------|-----------------|---------------|----------------|-------|
+{{ range .TierComparisons -}}
+| T{{ .Tier }} | {{ .LeftPassRate }} | {{ .RightPassRate }} | {{ .LeftAvgCorr }} | {{ .RightAvgCorr }} | {{ .DeltaCorrectness }} |
+{{ end -}}
+{{ end }}
+## Per-Task Comparison
+
+| Task | Left Pass | Right Pass | Left Score | Right Score | Left Time | Right Time | E2E Cases | Winner |
+|------|-----------|------------|------------|-------------|-----------|------------|-----------|--------|
+{{ range .Tasks -}}
+| {{ .TaskID }} | {{ .LeftPass }} | {{ .RightPass }} | {{ printf "%.2f" .LeftScore }} | {{ printf "%.2f" .RightScore }} | {{ .LeftTime }} | {{ .RightTime }} | {{ .E2ECases }} | {{ .Winner }} |
+{{ end }}
+{{ if .HasPairwise }}
+## Pairwise Comparison (LLM Judge)
+
+| Task | Winner | Consistent |
+|------|--------|------------|
+{{ range .PairwiseResults -}}
+| {{ .TaskID }} | {{ .Winner }} | {{ if .PositionConsistent }}Yes{{ else }}No{{ end }} |
+{{ end }}
+Pairwise: Left wins: {{ .PairwiseSummary.LeftWins }} | Right wins: {{ .PairwiseSummary.RightWins }} | Tie: {{ .PairwiseSummary.Ties }}
+{{ end }}
+## Summary
+
+Left wins: {{ .LeftWins }} | Right wins: {{ .RightWins }} | Tie: {{ .Ties }}

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trend Report</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 2rem; background: #f8f9fa; color: #212529; }
+h1 { border-bottom: 2px solid #dee2e6; padding-bottom: 0.5rem; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+th, td { border: 1px solid #dee2e6; padding: 8px 12px; text-align: left; }
+th { background: #e9ecef; font-weight: 600; }
+tr:nth-child(even) { background: #f8f9fa; }
+.trend-summary { margin-top: 1rem; padding: 1rem; background: #e7f3ff; border-radius: 8px; font-size: 1.1em; }
+.delta-pos { color: #28a745; }
+.delta-neg { color: #dc3545; }
+.delta-zero { color: #6c757d; }
+</style>
+</head>
+<body>
+<h1>Trend Report</h1>
+<table>
+<thead>
+<tr><th>Tag</th><th>Date</th><th>Pass Rate</th><th>Avg Correctness</th><th>Avg Wall Time</th><th>Tasks</th></tr>
+</thead>
+<tbody>
+{{range .Tags}}<tr>
+<td>{{.Tag}}</td>
+<td>{{.Date}}</td>
+<td>{{printf "%.1f%%" .PassRate}}</td>
+<td>{{printf "%.2f" .AvgCorrectness}}</td>
+<td>{{.AvgWallTime}}</td>
+<td>{{.Tasks}}</td>
+</tr>
+{{end}}</tbody>
+</table>
+{{if ge (len .Tags) 2}}
+<div class="trend-summary">
+<strong>Trend:</strong>
+Pass Rate <span class="{{deltaClass .DeltaPassRate}}">{{.DeltaPassRate}}</span>,
+Correctness <span class="{{deltaClass .DeltaCorrectness}}">{{.DeltaCorrectness}}</span>,
+Wall Time <span class="{{deltaClass .DeltaWallTime}}">{{.DeltaWallTime}}</span>
+</div>
+{{end}}
+</body>
+</html>

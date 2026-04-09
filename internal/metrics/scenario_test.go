@@ -66,6 +66,28 @@ func TestScenario_Correctness_MassiveVTDeduction(t *testing.T) {
 	}
 }
 
+// --- Bug fix: E2E compile failure should not yield perfect score ---
+// When e2e_test.go exists but compilation fails, the verify template now
+// produces L4=0/1 instead of L4=0/0. This test confirms correctness < 1.0.
+
+func TestScenario_Correctness_E2ECompileFailure(t *testing.T) {
+	got := CalculateCorrectness(CorrectnessInput{
+		L1Build:  true,
+		L2Passed: 8, L2Total: 8,
+		L3Issues: 0,
+		L4Passed: 0, L4Total: 1,
+	})
+	// L4=0/1 -> l4Score = 0.0
+	// 0.20*1.0 + 0.10*1.0 + 0.70*0.0 = 0.30
+	if !approxEqual(got, 0.30) {
+		t.Errorf("E2E compile failure: expected 0.30, got %.4f", got)
+	}
+	// Critical: must be less than 1.0 (the old bug gave 1.0 for L4=0/0)
+	if got >= 1.0 {
+		t.Errorf("E2E compile failure must NOT yield perfect score, got %.4f", got)
+	}
+}
+
 // --- Boundary: Exactly at lint threshold ---
 
 func TestScenario_Correctness_ExactlyTwentyLintIssues(t *testing.T) {

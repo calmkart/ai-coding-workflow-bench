@@ -14,6 +14,7 @@ import (
 type Config struct {
 	Workflows map[string]WorkflowConfig `yaml:"workflows"`
 	Defaults  Defaults                  `yaml:"defaults"`
+	Judge     JudgeConfig               `yaml:"judge"`
 
 	// DBPath can be set via YAML (db_path field) or auto-derived from config location.
 	// When set in YAML, it overrides the auto-derived path.
@@ -24,9 +25,25 @@ type Config struct {
 	HomeDir  string `yaml:"-"`
 }
 
+// JudgeConfig controls the LLM-as-Judge code quality evaluation.
+// When Enabled is true, each run's code changes are scored by an LLM
+// using the rubric dimensions (correctness, readability, etc.).
+// Requires ANTHROPIC_API_KEY environment variable.
+//
+// InputPricePerMTok and OutputPricePerMTok configure the cost model
+// for estimating USD cost from token counts. Defaults are $3/M input
+// and $15/M output (Anthropic Claude Sonnet 4 pricing).
+type JudgeConfig struct {
+	Enabled            bool    `yaml:"enabled"`
+	Model              string  `yaml:"model"`
+	InputPricePerMTok  float64 `yaml:"input_price_per_mtok"`
+	OutputPricePerMTok float64 `yaml:"output_price_per_mtok"`
+}
+
 // WorkflowConfig defines a workflow adapter and its settings.
 type WorkflowConfig struct {
 	Adapter       string   `yaml:"adapter"`
+	AgentsDir     string   `yaml:"agents_dir,omitempty"`
 	EntryCommand  string   `yaml:"entry_command,omitempty"`
 	SetupCommands []string `yaml:"setup_commands,omitempty"`
 }
@@ -35,6 +52,9 @@ type WorkflowConfig struct {
 func (wc WorkflowConfig) ToMap() map[string]any {
 	m := map[string]any{
 		"adapter": wc.Adapter,
+	}
+	if wc.AgentsDir != "" {
+		m["agents_dir"] = wc.AgentsDir
 	}
 	if wc.EntryCommand != "" {
 		m["entry_command"] = wc.EntryCommand
@@ -51,12 +71,23 @@ type Defaults struct {
 	TimeoutMultiplier int `yaml:"timeout_multiplier"`
 }
 
+// VerificationTarget represents a single verification target from task.yaml.
+type VerificationTarget struct {
+	ID        string `yaml:"id"`
+	Category  string `yaml:"category"`
+	Name      string `yaml:"name"`
+	Severity  string `yaml:"severity"`  // "critical", "high", "medium", "low"
+	Detection string `yaml:"detection"` // "go build", "e2e test case", "errcheck", etc.
+}
+
 // TaskMeta represents a task.yaml file.
 type TaskMeta struct {
-	ID               string `yaml:"id"`
-	Tier             int    `yaml:"tier"`
-	Type             string `yaml:"type"`
-	EstimatedMinutes int    `yaml:"estimated_minutes"`
+	ID                  string               `yaml:"id"`
+	Tier                int                  `yaml:"tier"`
+	Type                string               `yaml:"type"`
+	Language            string               `yaml:"language"` // "go", "python", "typescript"; defaults to "go" if empty
+	EstimatedMinutes    int                  `yaml:"estimated_minutes"`
+	VerificationTargets []VerificationTarget `yaml:"verification_targets"`
 
 	// Runtime fields (not from YAML)
 	Dir string `yaml:"-"` // absolute path to task directory
@@ -71,6 +102,10 @@ func DefaultConfig() *Config {
 		Defaults: Defaults{
 			RunsPerTask:       3,
 			TimeoutMultiplier: 3,
+		},
+		Judge: JudgeConfig{
+			InputPricePerMTok:  3.0,
+			OutputPricePerMTok: 15.0,
 		},
 	}
 }
@@ -129,6 +164,14 @@ func Load(configPath string) (*Config, error) {
 	// (yaml.Unmarshal with omitempty leaves the zero value "" when the field is absent).
 	if cfg.DBPath == "" {
 		cfg.DBPath = autoDB
+	}
+
+	// Default pricing if not set in YAML.
+	if cfg.Judge.InputPricePerMTok == 0 {
+		cfg.Judge.InputPricePerMTok = 3.0
+	}
+	if cfg.Judge.OutputPricePerMTok == 0 {
+		cfg.Judge.OutputPricePerMTok = 15.0
 	}
 
 	return cfg, nil
@@ -199,3 +242,4 @@ func LoadPlan(taskDir string) (string, error) {
 	}
 	return string(data), nil
 }
+

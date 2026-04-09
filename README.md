@@ -9,13 +9,20 @@ A benchmark tool for evaluating multi-agent coding workflow strategies. Given th
 ## Features
 
 - **Deterministic 4-layer verification**: build, unit tests, static analysis, E2E tests
-- **Correctness scoring**: weighted formula combining L1-L4 results into a 0-1 score
+- **Four-dimension composite scoring**: correctness, efficiency, quality, stability
+- **LLM Judge**: rubric-based code quality scoring via Anthropic API (7 dimensions)
+- **Pairwise comparison**: head-to-head code comparison with position bias detection
 - **Multiple workflow adapters**: compare vanilla Claude CLI, multi-agent workflows, or custom commands
 - **Built-in task library**: curated Go tasks across 4 difficulty tiers
 - **Isolated execution**: each run gets its own git worktree -- no cross-contamination
 - **Checkpoint/resume**: interrupted runs pick up where they left off
-- **Markdown reports**: auto-generated summaries with per-task breakdowns
+- **Parallel execution**: run multiple tasks concurrently with `--parallel`
+- **Sharded execution**: distribute work across machines with `--shard`
+- **Markdown and HTML reports**: auto-generated summaries, comparisons, and trend charts
+- **Trend tracking**: view metrics evolution across multiple tagged runs
+- **Data management**: export (JSON/CSV), import from git history, merge sharded results, clean old data
 - **SQLite storage**: all results persisted locally for querying and comparison
+- **Environment diagnostics**: `doctor` command validates prerequisites
 
 ## Quick Start
 
@@ -55,7 +62,7 @@ go build -o workflow-bench ./cmd/workflow-bench
 
 ## Architecture
 
-### Package Structure
+### Package Structure (10 packages)
 
 ```
 workflow-bench/
@@ -71,13 +78,24 @@ workflow-bench/
 │   │   ├── adapter.go      Adapter interface + registry
 │   │   ├── vanilla.go      Claude CLI direct execution
 │   │   └── custom.go       User-defined command execution
+│   ├── judge/              LLM Judge: rubric scoring + pairwise comparison
+│   │   ├── rubric.go       7-dimension rubric evaluation via Anthropic API
+│   │   └── pairwise.go     Head-to-head code comparison with position bias detection
 │   ├── metrics/
-│   │   └── correctness.go  Correctness score formula
+│   │   ├── correctness.go  Correctness score formula
+│   │   ├── cost.go         Unified cost estimation
+│   │   └── statistics.go   Wilson CI, significance testing, stability scoring
 │   ├── store/
 │   │   ├── db.go           SQLite CRUD (pure Go, no CGO)
 │   │   └── schema.sql      Database schema
-│   └── report/
-│       └── summary.go      Markdown report generation
+│   ├── report/
+│   │   ├── summary.go      Markdown/HTML summary reports
+│   │   ├── compare.go      Side-by-side comparison reports
+│   │   ├── trend.go        Multi-tag trend reports
+│   │   ├── export.go       JSON/CSV data export
+│   │   └── html.go         HTML report rendering
+│   ├── importer/           Task import from git history
+│   └── taskgen/            Task variant generation
 └── tasks/                  Built-in task library (100 tasks)
     ├── tier1/              20 simple tasks (~5 min)
     ├── tier2/              32 medium tasks (~10 min)
@@ -114,8 +132,17 @@ workflow-bench/
 
 | Command | Description |
 |---------|-------------|
-| `run` | Run benchmark against tasks with a specified workflow |
-| `report` | Generate a Markdown report for a tagged run |
+| `run` | Run benchmark against tasks (`--parallel`, `--shard`, `--keep-worktree`, `--pairwise`) |
+| `report` | Generate summary report (`--format markdown\|html`) |
+| `compare` | Compare two tagged runs side-by-side (`--pairwise` for LLM comparison) |
+| `trend` | Show metrics trend across multiple tags (`--tags v1,v2,v3`) |
+| `export` | Export raw data as JSON or CSV |
+| `inspect` | View raw output (verify.log, diff.patch) for a specific run |
+| `import` | Create task from git commit history |
+| `generate-variant` | Generate task variant with renamed identifiers |
+| `merge` | Merge multiple result databases (for sharded execution) |
+| `clean` | Delete runs by tag, by age, or clean orphaned worktrees |
+| `doctor` | Check environment prerequisites |
 | `list tasks` | List all available tasks |
 | `list workflows` | List available workflow adapters |
 | `list tags` | List all benchmark tags with run counts |
@@ -181,12 +208,25 @@ Config lives at `~/.claude/workflow-bench/bench.yaml` (created by `init`).
 workflows:
   vanilla:
     adapter: vanilla
-  # my-workflow:                   # Custom adapter example
+
+  # Example: multi-agent workflow using custom adapter
+  # multi-agent:
   #   adapter: custom
-  #   entry_command: |
-  #     claude -p "$BENCH_PLAN_PROMPT" --output-format json
   #   setup_commands:
-  #     - "cp -r ~/my-agents/ .claude/agents/"
+  #     - "mkdir -p .claude/agents"
+  #     - "cp -r ~/.claude/agents/*.md .claude/agents/"
+  #     - "cp -r ~/.claude/agents/reference .claude/agents/ 2>/dev/null || true"
+  #     - "mkdir -p .planning/manager"
+  #   entry_command: |
+  #     claude --agent manager -p "You are running a benchmark evaluation. Execute your FULL multi-agent workflow:
+  #     1. Read the plan from $BENCH_PLAN_FILE
+  #     2. Spawn Architect agent to formalize the plan into a spec
+  #     3. Spawn Coding agent to implement from the spec
+  #     4. Spawn Testing agent to write scenario tests
+  #     5. Spawn Challenger agent to review the implementation
+  #     6. Fix any issues found by Challenger
+  #     7. Repeat until Challenger passes
+  #     IMPORTANT: Do NOT skip any phase. All permission gates are pre-approved." --output-format json --dangerously-skip-permissions
 
 defaults:
   runs_per_task: 3
@@ -240,13 +280,11 @@ See [docs/development.md](docs/development.md) for the full development guide.
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| **P1** | CLI, vanilla adapter, SQLite, L1-L4 verify, reports | Done |
-| **P2** | Custom adapter, 100 tasks (T1-T4) | Done |
-| **P3** | Comparison reports, LLM Judge (Rubric scoring via Anthropic API) | Planned |
-| **P4** | Pairwise comparison, Bradley-Terry ranking, calibration samples | Planned |
-| **P5** | Git history importer: scan, group, evaluate, generate plans | Planned |
-| **P6** | Dynamic private dimensions, full Pairwise, multi-model ensemble | Planned |
-| **P7** | Stability scoring (K=5), parallel execution, real cluster E2E | Planned |
+| **v1 (P1-P6)** | Wilson CI, VT detection, data export, inspect/doctor, 4-dim composite | Done |
+| **v2 (P7-P12)** | verify.sh JSON, unified cost, VT mapping, Judge timeout, stability score | Done |
+| **v2 (P13-P18)** | LLM Judge rubric, HTML reports, compare enhancements, pairwise comparison | Done |
+| **v2 (P19-P22)** | Task import from git, variant generation, sharded execution, DB merge | Done |
+| **v2 (P23-P25)** | Trend reports, clean command, documentation sync | Done |
 
 ## License
 

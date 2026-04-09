@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -uo pipefail
+TASK_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$1"
+cd "$REPO_DIR"
+
+TMPDIR=$(mktemp -d /tmp/bench-verify.XXXXXX)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+echo "=== L1: Type Check ==="
+if ! npx tsc --noEmit 2>&1; then
+  echo "BENCH_RESULT: L1=FAIL"
+  exit 1
+fi
+
+echo "=== L2: Unit Tests ==="
+UT_PASS=0
+UT_FAIL=0
+if [ -f "vitest.config.ts" ] || [ -f "vitest.config.js" ] || grep -q '"vitest"' package.json 2>/dev/null; then
+  npx vitest run --reporter=verbose 2>&1 | tee "$TMPDIR/bench-ut.log" || true
+  UT_PASS=$(grep -cE "^\s*✓|^\s*√|PASS" "$TMPDIR/bench-ut.log") || UT_PASS=0
+  UT_FAIL=$(grep -cE "^\s*✗|^\s*×|FAIL" "$TMPDIR/bench-ut.log") || UT_FAIL=0
+elif grep -q '"jest"' package.json 2>/dev/null; then
+  npx jest --verbose 2>&1 | tee "$TMPDIR/bench-ut.log" || true
+  UT_PASS=$(grep -oE 'Tests:\s+[0-9]+ passed' "$TMPDIR/bench-ut.log" | grep -oE '[0-9]+') || UT_PASS=0
+  UT_FAIL=$(grep -oE 'Tests:\s+[0-9]+ failed' "$TMPDIR/bench-ut.log" | grep -oE '[0-9]+') || UT_FAIL=0
+fi
+if [ "$UT_PASS" -eq 0 ] && [ "$UT_FAIL" -eq 0 ]; then
+  if grep -q "error\|Error\|SyntaxError" "$TMPDIR/bench-ut.log" 2>/dev/null; then
+    UT_FAIL=1
+  fi
+fi
+
+echo "=== L3: Lint ==="
+LINT_ISSUES=0
+if command -v npx >/dev/null 2>&1; then
+  if [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ] || [ -f ".eslintrc.yml" ] || [ -f "eslint.config.js" ] || [ -f "eslint.config.mjs" ] || grep -q '"eslint"' package.json 2>/dev/null; then
+    npx eslint . --format compact >"$TMPDIR/bench-lint.log" 2>&1 || true
+    LINT_ISSUES=$(grep -cE "^/" "$TMPDIR/bench-lint.log") || LINT_ISSUES=0
+  fi
+fi
+
+echo "=== L4: E2E ==="
+if [ -f "$TASK_DIR/e2e_test.ts" ]; then
+  cp "$TASK_DIR/e2e_test.ts" "$REPO_DIR/bench_e2e_test.ts"
+  E2E_PASS=0
+  E2E_FAIL=0
+  if [ -f "vitest.config.ts" ] || [ -f "vitest.config.js" ] || grep -q '"vitest"' package.json 2>/dev/null; then
+    npx vitest run bench_e2e_test.ts --reporter=verbose 2>&1 | tee "$TMPDIR/bench-e2e.log" || true
+    E2E_PASS=$(grep -cE "^\s*✓|^\s*√|PASS" "$TMPDIR/bench-e2e.log") || E2E_PASS=0
+    E2E_FAIL=$(grep -cE "^\s*✗|^\s*×|FAIL" "$TMPDIR/bench-e2e.log") || E2E_FAIL=0
+  elif grep -q '"jest"' package.json 2>/dev/null; then
+    npx jest bench_e2e_test.ts --verbose 2>&1 | tee "$TMPDIR/bench-e2e.log" || true
+    E2E_PASS=$(grep -oE 'Tests:\s+[0-9]+ passed' "$TMPDIR/bench-e2e.log" | grep -oE '[0-9]+') || E2E_PASS=0
+    E2E_FAIL=$(grep -oE 'Tests:\s+[0-9]+ failed' "$TMPDIR/bench-e2e.log" | grep -oE '[0-9]+') || E2E_FAIL=0
+  fi
+  if [ "$E2E_PASS" -eq 0 ] && [ "$E2E_FAIL" -eq 0 ]; then
+    E2E_FAIL=1
+  fi
+  rm -f "$REPO_DIR/bench_e2e_test.ts"
+else
+  E2E_PASS=0
+  E2E_FAIL=0
+fi
+
+echo "BENCH_RESULT: L1=PASS L2=${UT_PASS}/$((UT_PASS+UT_FAIL)) L3=${LINT_ISSUES} L4=${E2E_PASS}/$((E2E_PASS+E2E_FAIL))"

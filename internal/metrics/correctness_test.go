@@ -86,6 +86,24 @@ func TestCalculateCorrectness(t *testing.T) {
 			// deduction: 0.24 - 0.5 = -0.26 -> clamped to 0
 			want: 0.0,
 		},
+		{
+			name: "E2E compile failure L4=0/1",
+			input: CorrectnessInput{
+				L1Build: true, L2Passed: 8, L2Total: 8,
+				L3Issues: 0, L4Passed: 0, L4Total: 1,
+			},
+			// 0.20*1.0 + 0.10*1.0 + 0.70*(0/1) = 0.20 + 0.10 + 0.00 = 0.30
+			want: 0.30,
+		},
+		{
+			name: "UT compile failure L2=0/1",
+			input: CorrectnessInput{
+				L1Build: true, L2Passed: 0, L2Total: 1,
+				L3Issues: 0, L4Passed: 5, L4Total: 5,
+			},
+			// 0.20*(0/1) + 0.10*1.0 + 0.70*1.0 = 0.00 + 0.10 + 0.70 = 0.80
+			want: 0.80,
+		},
 	}
 
 	for _, tt := range tests {

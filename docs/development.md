@@ -10,7 +10,7 @@ Optional tools (improve L3 static analysis results):
 - `staticcheck` -- `go install honnef.co/go/tools/cmd/staticcheck@latest`
 - `gosec` -- `go install github.com/securego/gosec/v2/cmd/gosec@latest`
 
-## Project Structure
+## Project Structure (10 packages)
 
 ```
 cmd/workflow-bench/main.go       CLI entry point, cobra command definitions
@@ -27,19 +27,35 @@ internal/
     adapter.go                   Adapter interface, RunOutput type, registry
     vanilla.go                   VanillaAdapter: runs `claude -p` with the plan
     custom.go                    CustomAdapter: user-defined command execution
+  judge/
+    rubric.go                    7-dimension rubric evaluation via Anthropic API
+    pairwise.go                  Head-to-head code comparison with position bias detection
   metrics/
     correctness.go               Correctness score calculation (weighted L1-L4)
+    cost.go                      Unified cost estimation
+    statistics.go                Wilson CI, significance testing, stability scoring
   store/
     db.go                        SQLite database operations (pure Go, no CGO)
     schema.sql                   Database schema (embedded via go:embed)
   report/
-    summary.go                   Markdown report generation
+    summary.go                   Markdown/HTML summary reports
+    compare.go                   Side-by-side comparison reports
+    trend.go                     Multi-tag trend reports
+    export.go                    JSON/CSV data export
+    html.go                      HTML report rendering
     templates/
-      summary.md.tmpl            Report template (embedded via go:embed)
+      summary.md.tmpl            Summary report template
+      summary.html.tmpl          HTML summary template
+      compare.md.tmpl            Comparison report template
+      compare.html.tmpl          HTML comparison template
+      trend.html.tmpl            HTML trend report template
+  importer/                      Task import from git history
+  taskgen/                       Task variant generation
 tasks/
-  tier1/
-    fix-handler-bug/             T1 task: fix pagination off-by-one
-    add-health-check/            T1 task: add /health endpoint
+  tier1/                         20 simple tasks (~5 min)
+  tier2/                         32 medium tasks (~10 min)
+  tier3/                         29 complex tasks (~15-20 min)
+  tier4/                         19 advanced tasks (~25-30 min)
 ```
 
 ## Building
@@ -236,4 +252,16 @@ sqlite3 ~/.claude/workflow-bench/results.db "SELECT task_id, status, correctness
 
 ### Verify Script
 
-The verify script is generated to a temp directory and deleted after each run. To inspect it, add a debug print or temporarily comment out the `defer os.RemoveAll(verifyDir)` in `runner.go`.
+The verify script is generated to a temp directory and deleted after each run. Use `--keep-worktree` to preserve it, or use `inspect` to view the verify.log output:
+
+```bash
+workflow-bench inspect --run-id <run-id>
+```
+
+### Environment Check
+
+Run `doctor` to verify your development environment:
+
+```bash
+workflow-bench doctor
+```

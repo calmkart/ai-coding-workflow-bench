@@ -264,3 +264,105 @@ func TestFilterTasks(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadJudgeConfig verifies that the judge section is parsed from YAML.
+func TestLoadJudgeConfig(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+judge:
+  enabled: true
+  model: claude-sonnet-4-20250514
+defaults:
+  runs_per_task: 3
+`
+	path := filepath.Join(dir, "bench.yaml")
+	if err := os.WriteFile(path, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Judge.Enabled {
+		t.Error("expected judge.enabled=true")
+	}
+	if cfg.Judge.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("expected judge.model=claude-sonnet-4-20250514, got %q", cfg.Judge.Model)
+	}
+}
+
+// TestDiscoverTasks_VTsParsed verifies that verification_targets are parsed from task.yaml.
+func TestDiscoverTasks_VTsParsed(t *testing.T) {
+	dir := t.TempDir()
+	taskDir := filepath.Join(dir, "tier1", "test-vt")
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	taskYAML := `
+id: "tier1/test-vt"
+tier: 1
+type: "concurrency"
+estimated_minutes: 5
+verification_targets:
+  - id: VT-LEAK-01
+    category: concurrency
+    name: "goroutine leak"
+    severity: critical
+    detection: "e2e test case"
+  - id: VT-BUILD-01
+    category: build
+    name: "build check"
+    severity: medium
+    detection: "go build"
+`
+	if err := os.WriteFile(filepath.Join(taskDir, "task.yaml"), []byte(taskYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := DiscoverTasks(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if len(tasks[0].VerificationTargets) != 2 {
+		t.Fatalf("expected 2 VTs, got %d", len(tasks[0].VerificationTargets))
+	}
+	vt0 := tasks[0].VerificationTargets[0]
+	if vt0.ID != "VT-LEAK-01" {
+		t.Errorf("expected VT id 'VT-LEAK-01', got %q", vt0.ID)
+	}
+	if vt0.Severity != "critical" {
+		t.Errorf("expected severity 'critical', got %q", vt0.Severity)
+	}
+	if vt0.Detection != "e2e test case" {
+		t.Errorf("expected detection 'e2e test case', got %q", vt0.Detection)
+	}
+}
+
+// TestLoadJudgeConfig_DefaultsToDisabled verifies judge is disabled by default.
+func TestLoadJudgeConfig_DefaultsToDisabled(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+defaults:
+  runs_per_task: 3
+`
+	path := filepath.Join(dir, "bench.yaml")
+	if err := os.WriteFile(path, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Judge.Enabled {
+		t.Error("expected judge.enabled=false by default")
+	}
+	if cfg.Judge.Model != "" {
+		t.Errorf("expected empty judge.model by default, got %q", cfg.Judge.Model)
+	}
+}

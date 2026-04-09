@@ -41,11 +41,17 @@ func CalculateCorrectness(input CorrectnessInput) float64 {
 
 	l3Score := math.Max(0, 1.0-float64(input.L3Issues)*0.05)
 
+	// L4 score: if the task has E2E tests and they compile, l4Total > 0.
+	// If l4Total == 0, it means no E2E test file exists for this task (acceptable).
+	// The verify template guarantees that when an E2E test file exists but fails to
+	// compile (0 PASS + 0 FAIL), it sets E2E_FAIL=1, so l4Total >= 1 in that case.
+	// We keep l4Score = 1.0 for the "no E2E file" case since having no E2E tests
+	// shouldn't penalize — tasks without E2E files simply don't have that coverage.
 	var l4Score float64
 	if input.L4Total > 0 {
 		l4Score = float64(input.L4Passed) / float64(input.L4Total)
 	} else {
-		l4Score = 1.0 // No E2E tests = no failures.
+		l4Score = 1.0 // No E2E test file exists for this task.
 	}
 
 	correctness := 0.20*l2Score + 0.10*l3Score + 0.70*l4Score

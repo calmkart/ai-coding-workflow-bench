@@ -44,17 +44,13 @@ defaults:
   #   tier3: 2.00
   #   tier4: 5.00
 
-# LLM Judge settings (planned for P3+)
-# judge:
-#   model: "claude-sonnet-4-20250514"  # (illustrative; update to current model names)
-#   ensemble_model: "gpt-4o"  # (illustrative; update to current model names)
-#   pairwise_mode: "compact"       # compact | full
-#   enable_ensemble: false
-
-# Import settings (planned for P6+)
-# import:
-#   time_window_hours: 72
-#   jaccard_threshold: 0.3
+# LLM Judge settings
+judge:
+  enabled: false                     # Set to true to enable rubric scoring
+  model: "claude-sonnet-4-20250514"  # Model for Rubric and Pairwise evaluation
+  input_price_per_mtok: 3.0         # Input token price per million tokens
+  output_price_per_mtok: 15.0       # Output token price per million tokens
+  repeat: 1                          # Number of judge evaluations per run
 ```
 
 ## Field Reference
@@ -80,7 +76,7 @@ Default parameters for benchmark runs.
 | `runs_per_task` | int | 3 | Number of times to run each task (per workflow). Overridden by `--runs`. |
 | `timeout_multiplier` | int | 3 | Multiplied by `estimated_minutes` from task.yaml to get the per-run timeout. |
 
-### defaults.cost_budget (planned)
+### defaults.cost_budget
 
 Per-tier cost budgets for efficiency score normalization.
 
@@ -91,16 +87,17 @@ Per-tier cost budgets for efficiency score normalization.
 | `tier3` | float | 2.00 | Max expected USD cost for a T3 task |
 | `tier4` | float | 5.00 | Max expected USD cost for a T4 task |
 
-### judge (planned)
+### judge
 
 LLM Judge configuration for code quality scoring.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | string | `claude-sonnet-4-20250514` | Model for Rubric and Pairwise evaluation (illustrative; update to current model names) |
-| `ensemble_model` | string | `gpt-4o` | Second model for ensemble evaluation (illustrative; update to current model names) |
-| `pairwise_mode` | string | `compact` | `compact` (14 calls) or `full` (up to 50 calls) |
-| `enable_ensemble` | bool | false | Enable multi-model ensemble for T3-T4 tasks |
+| `enabled` | bool | false | Enable rubric scoring after each run |
+| `model` | string | `claude-sonnet-4-20250514` | Model for Rubric and Pairwise evaluation |
+| `input_price_per_mtok` | float | 3.0 | Input token price per million tokens (for cost tracking) |
+| `output_price_per_mtok` | float | 15.0 | Output token price per million tokens |
+| `repeat` | int | 1 | Number of judge evaluations per run (for score averaging) |
 
 ## Environment Variables
 
@@ -123,7 +120,7 @@ Config values are merged with defaults: if your config only specifies `workflows
 | Adapter | Use When | Example |
 |---------|----------|---------|
 | `vanilla` | Baseline testing with direct Claude CLI | `claude -p` with plan content |
-| `custom` | Any other tool, wrapper script, or custom configuration | Aider, Cursor, custom scripts |
+| `custom` | Any other tool, wrapper script, multi-agent workflow, or custom configuration | Aider, Cursor, custom scripts, `claude --agent manager` |
 
 Use `vanilla` as the baseline, then compare against `custom` workflows.
 
@@ -171,7 +168,30 @@ If stdout is not valid JSON or lacks `usage`, token data is reported as N/A.
 
 ### Examples
 
-**Example 1: Claude CLI with custom agents**
+**Example 1: Multi-agent workflow (replaces the former v4-claude adapter)**
+
+```yaml
+workflows:
+  multi-agent:
+    adapter: custom
+    setup_commands:
+      - "mkdir -p .claude/agents"
+      - "cp -r ~/.claude/agents/*.md .claude/agents/"
+      - "cp -r ~/.claude/agents/reference .claude/agents/ 2>/dev/null || true"
+      - "mkdir -p .planning/manager"
+    entry_command: |
+      claude --agent manager -p "You are running a benchmark evaluation. Execute your FULL multi-agent workflow:
+      1. Read the plan from $BENCH_PLAN_FILE
+      2. Spawn Architect agent to formalize the plan into a spec
+      3. Spawn Coding agent to implement from the spec
+      4. Spawn Testing agent to write scenario tests
+      5. Spawn Challenger agent to review the implementation
+      6. Fix any issues found by Challenger
+      7. Repeat until Challenger passes
+      IMPORTANT: Do NOT skip any phase. All permission gates are pre-approved." --output-format json --dangerously-skip-permissions
+```
+
+**Example 2: Claude CLI with custom agents**
 
 ```yaml
 workflows:
@@ -184,7 +204,7 @@ workflows:
       - "mkdir -p .planning/manager"
 ```
 
-**Example 2: Shell script wrapper**
+**Example 3: Shell script wrapper**
 
 ```yaml
 workflows:
@@ -196,7 +216,7 @@ workflows:
 
 ```bash
 # Run with a custom workflow
-workflow-bench run --workflow my-agents --tasks tier1 --runs 1 --tag test
+workflow-bench run --workflow multi-agent --tasks tier1 --runs 1 --tag test
 ```
 
 ## Adding a New Adapter (Go)

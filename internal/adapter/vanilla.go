@@ -45,6 +45,7 @@ func (a *VanillaAdapter) Run(ctx context.Context, worktreeDir string, planConten
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p", planPrompt,
 		"--output-format", "json",
+		"--dangerously-skip-permissions",
 	)
 	cmd.Dir = worktreeDir
 

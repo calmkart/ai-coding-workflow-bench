@@ -10,7 +10,7 @@
 - `staticcheck` -- `go install honnef.co/go/tools/cmd/staticcheck@latest`
 - `gosec` -- `go install github.com/securego/gosec/v2/cmd/gosec@latest`
 
-## 项目结构
+## 项目结构（10 个包）
 
 ```
 cmd/workflow-bench/main.go       CLI 入口，cobra 命令定义
@@ -27,19 +27,35 @@ internal/
     adapter.go                   Adapter 接口、RunOutput 类型、注册表
     vanilla.go                   VanillaAdapter：使用计划运行 `claude -p`
     custom.go                    CustomAdapter：用户自定义命令执行
+  judge/
+    rubric.go                    7 维 Rubric 评估（通过 Anthropic API）
+    pairwise.go                  代码头对头比较（含位置偏差检测）
   metrics/
     correctness.go               正确性评分计算（加权 L1-L4）
+    cost.go                      统一成本估算
+    statistics.go                Wilson CI、显著性检验、稳定性评分
   store/
     db.go                        SQLite 数据库操作（纯 Go，无 CGO）
     schema.sql                   数据库 schema（通过 go:embed 嵌入）
   report/
-    summary.go                   Markdown 报告生成
+    summary.go                   Markdown/HTML 汇总报告
+    compare.go                   并排对比报告
+    trend.go                     多 tag 趋势报告
+    export.go                    JSON/CSV 数据导出
+    html.go                      HTML 报告渲染
     templates/
-      summary.md.tmpl            报告模板（通过 go:embed 嵌入）
+      summary.md.tmpl            汇总报告模板
+      summary.html.tmpl          HTML 汇总模板
+      compare.md.tmpl            对比报告模板
+      compare.html.tmpl          HTML 对比模板
+      trend.html.tmpl            HTML 趋势报告模板
+  importer/                      从 git 历史导入任务
+  taskgen/                       任务变体生成
 tasks/
-  tier1/
-    fix-handler-bug/             T1 任务：修复分页 off-by-one
-    add-health-check/            T1 任务：添加 /health 端点
+  tier1/                         20 个简单任务（~5 分钟）
+  tier2/                         32 个中等任务（~10 分钟）
+  tier3/                         29 个复杂任务（~15-20 分钟）
+  tier4/                         19 个高级任务（~25-30 分钟）
 ```
 
 ## 构建
@@ -236,4 +252,16 @@ sqlite3 ~/.claude/workflow-bench/results.db "SELECT task_id, status, correctness
 
 ### 验证脚本
 
-验证脚本生成到临时目录，每次运行后删除。如需查看，可添加调试输出或临时注释掉 `runner.go` 中的 `defer os.RemoveAll(verifyDir)`。
+验证脚本生成到临时目录，每次运行后删除。使用 `--keep-worktree` 保留，或使用 `inspect` 查看 verify.log 输出：
+
+```bash
+workflow-bench inspect --run-id <run-id>
+```
+
+### 环境检查
+
+运行 `doctor` 验证开发环境：
+
+```bash
+workflow-bench doctor
+```

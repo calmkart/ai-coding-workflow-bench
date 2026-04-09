@@ -38,3 +38,7 @@ Thumbs.db
 # Environment
 .env
 .env.*
+
+# Task repo build artifacts
+todo-api
+taskcli

@@ -3,9 +3,12 @@ package engine
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"time"
 )
 
 // CreateWorktree creates an isolated git worktree from a task repo.
@@ -47,9 +50,52 @@ func CleanupWorktree(repoDir string, worktreeDir string) error {
 	return nil
 }
 
+// CleanupOrphanedWorktrees removes stale worktree and verify temp directories
+// that are older than 2 hours. These can accumulate when runs crash or are killed
+// without proper cleanup.
+//
+// Patterns cleaned:
+//   - bench-worktree-* (orphaned git worktrees)
+//   - bench-verify-* (orphaned verify temp dirs)
+//
+// @implements P12 (worktree orphan cleanup)
+func CleanupOrphanedWorktrees() {
+	cutoff := time.Now().Add(-2 * time.Hour)
+
+	// Clean up orphaned worktrees.
+	worktreePattern := filepath.Join(os.TempDir(), "bench-worktree-*")
+	cleanupOldDirs(worktreePattern, cutoff)
+
+	// Clean up orphaned verify temp dirs.
+	verifyPattern := filepath.Join(os.TempDir(), "bench-verify-*")
+	cleanupOldDirs(verifyPattern, cutoff)
+}
+
+// cleanupOldDirs removes directories matching a glob pattern that are older than cutoff.
+func cleanupOldDirs(pattern string, cutoff time.Time) {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return
+	}
+	for _, dir := range matches {
+		info, err := os.Stat(dir)
+		if err == nil && info.ModTime().Before(cutoff) {
+			slog.Info("cleaning up orphaned temp dir", "dir", dir)
+			os.RemoveAll(dir)
+		}
+	}
+}
+
+// ensureGitMu serializes EnsureGitRepo calls to prevent TOCTOU races
+// when multiple goroutines initialize the same repo concurrently.
+var ensureGitMu sync.Mutex
+
 // EnsureGitRepo initializes a git repo in dir if one doesn't exist.
 // Used to ensure task repo/ directories are git repos for worktree operations.
 func EnsureGitRepo(dir string) error {
+	ensureGitMu.Lock()
+	defer ensureGitMu.Unlock()
+
 	gitDir := filepath.Join(dir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
 		return nil // Already a git repo.

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -uo pipefail
+TASK_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$1"
+cd "$REPO_DIR"
+
+TMPDIR=$(mktemp -d /tmp/bench-verify.XXXXXX)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+echo "=== L1: Syntax Check ==="
+PY_FILES=$(find . -name "*.py" -not -path "./.venv/*" -not -path "./node_modules/*" 2>/dev/null)
+if [ -z "$PY_FILES" ]; then
+  echo "No Python files found"
+  echo "BENCH_RESULT: L1=FAIL"
+  exit 1
+fi
+SYNTAX_OK=true
+for f in $PY_FILES; do
+  if ! python3 -m py_compile "$f" 2>&1; then
+    SYNTAX_OK=false
+  fi
+done
+if [ "$SYNTAX_OK" = "false" ]; then
+  echo "BENCH_RESULT: L1=FAIL"
+  exit 1
+fi
+
+echo "=== L2: Unit Tests ==="
+python3 -m pytest --tb=short -v --no-header -q 2>&1 | tee "$TMPDIR/bench-ut.log" || true
+# Parse pytest output: "X passed, Y failed"
+UT_PASS=$(grep -oE '[0-9]+ passed' "$TMPDIR/bench-ut.log" | grep -oE '[0-9]+') || UT_PASS=0
+UT_FAIL=$(grep -oE '[0-9]+ failed' "$TMPDIR/bench-ut.log" | grep -oE '[0-9]+') || UT_FAIL=0
+if [ "$UT_PASS" -eq 0 ] && [ "$UT_FAIL" -eq 0 ]; then
+  if grep -q "error\|Error\|SyntaxError" "$TMPDIR/bench-ut.log" 2>/dev/null; then
+    UT_FAIL=1
+  fi
+fi
+
+echo "=== L3: Lint ==="
+LINT_ISSUES=0
+if command -v ruff >/dev/null 2>&1; then
+  ruff check . >"$TMPDIR/bench-lint.log" 2>&1 || true
+  LINT_ISSUES=$(grep -c "^" "$TMPDIR/bench-lint.log") || LINT_ISSUES=0
+elif command -v flake8 >/dev/null 2>&1; then
+  flake8 . >"$TMPDIR/bench-lint.log" 2>&1 || true
+  LINT_ISSUES=$(grep -c "^" "$TMPDIR/bench-lint.log") || LINT_ISSUES=0
+fi
+
+echo "=== L4: E2E ==="
+if [ -f "$TASK_DIR/e2e_test.py" ]; then
+  cp "$TASK_DIR/e2e_test.py" "$REPO_DIR/bench_e2e_test.py"
+  python3 -m pytest bench_e2e_test.py -v --no-header -q 2>&1 | tee "$TMPDIR/bench-e2e.log" || true
+  E2E_PASS=$(grep -oE '[0-9]+ passed' "$TMPDIR/bench-e2e.log" | grep -oE '[0-9]+') || E2E_PASS=0
+  E2E_FAIL=$(grep -oE '[0-9]+ failed' "$TMPDIR/bench-e2e.log" | grep -oE '[0-9]+') || E2E_FAIL=0
+  if [ "$E2E_PASS" -eq 0 ] && [ "$E2E_FAIL" -eq 0 ]; then
+    E2E_FAIL=1
+  fi
+  rm -f "$REPO_DIR/bench_e2e_test.py"
+else
+  E2E_PASS=0
+  E2E_FAIL=0
+fi
+
+echo "BENCH_RESULT: L1=PASS L2=${UT_PASS}/$((UT_PASS+UT_FAIL)) L3=${LINT_ISSUES} L4=${E2E_PASS}/$((E2E_PASS+E2E_FAIL))"

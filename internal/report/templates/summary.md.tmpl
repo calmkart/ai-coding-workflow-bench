@@ -1,15 +1,54 @@
 # Benchmark Report: {{ .Tag }}
 
 > Workflow: {{ .Workflow }} | Date: {{ .Date }} | Runs/task: {{ .RunsPerTask }}
-
+{{ if .LowSampleWarning }}
+> :warning: {{ .LowSampleWarning }}
+{{ end }}
 ## Overall
 
 | Metric | Value |
 |--------|-------|
 | Tasks | {{ .TotalTasks }} |
-| Pass Rate (L4 E2E) | {{ printf "%.1f%%" .PassRate }} |
+| Pass Rate (L4 E2E) | {{ .PassRateCI }} |
 | Avg Correctness | {{ printf "%.2f" .AvgCorrectness }} |
+{{- if .AvgWallTime }}
+| Avg Wall Time | {{ .AvgWallTime }} |
+{{- end }}
+{{- if .AvgTokens }}
+| Avg Tokens | {{ .AvgTokens }} |
+{{- end }}
+{{- if .TotalCost }}
+| Est. Total Cost | {{ .TotalCost }} |
+{{- end }}
+{{ if .HasRubric }}
+## Code Quality (LLM Judge)
 
+| Dimension | Score | Weight |
+|-----------|-------|--------|
+| Correctness | {{ printf "%.1f" .Rubric.Correctness }}/5 | 25% |
+| Readability | {{ printf "%.1f" .Rubric.Readability }}/5 | 15% |
+| Simplicity | {{ printf "%.1f" .Rubric.Simplicity }}/5 | 15% |
+| Robustness | {{ printf "%.1f" .Rubric.Robustness }}/5 | 15% |
+| Minimality | {{ printf "%.1f" .Rubric.Minimality }}/5 | 15% |
+| Maintainability | {{ printf "%.1f" .Rubric.Maintainability }}/5 | 15% |
+| **Composite** | **{{ printf "%.1f" .Rubric.Composite }}/5** | |
+| Go Idioms | {{ printf "%.1f" .Rubric.GoIdioms }}/5 | (separate) |
+{{ if .ConsistencyWarnings }}
+> :warning: Consistency warnings:
+{{ range .ConsistencyWarnings -}}
+> - {{ . }}
+{{ end -}}
+{{ end -}}
+{{ end }}
+{{ if .TierGroups }}
+## Per-Tier Summary
+
+| Tier | Tasks | Pass Rate | Avg Correctness |
+|------|-------|-----------|-----------------|
+{{ range .TierGroups -}}
+| T{{ .Tier }} | {{ .TaskCount }} | {{ .PassRate }} | {{ .AvgCorrectness }} |
+{{ end -}}
+{{ end }}
 ## Per-Task Detail
 {{ if .TaskGroups }}
 {{ range .TaskGroups -}}
@@ -26,5 +65,14 @@
 |------|------|------|----|----|----|----|-------------|
 {{ range .Tasks -}}
 | {{ .ID }} | T{{ .Tier }} | {{ .Type }} | {{ if .L1 }}PASS{{ else }}**FAIL**{{ end }} | {{ .L2Pass }}/{{ .L2Total }} | {{ .L3Issues }} | {{ .L4Pass }}/{{ .L4Total }} | {{ if .L1 }}{{ printf "%.2f" .Correctness }}{{ else }}{{ printf "%.2f" .Correctness }} !!{{ end }} |
+{{ end -}}
+{{ end }}
+{{ if .StabilityData }}
+## Stability
+
+| Task | Pass/Total | Stability |
+|------|-----------|-----------|
+{{ range .StabilityData -}}
+| {{ .TaskID }} | {{ .PassCount }}/{{ .TotalRuns }} | {{ .Stability }} |
 {{ end -}}
 {{ end }}

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comparison: {{ .LeftTag }} vs {{ .RightTag }}</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; color: #24292e; line-height: 1.5; }
+h1 { border-bottom: 1px solid #e1e4e8; padding-bottom: 8px; }
+h2 { border-bottom: 1px solid #e1e4e8; padding-bottom: 4px; margin-top: 24px; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+th { background: #f5f5f5; font-weight: 600; }
+tr:nth-child(even) { background: #fafbfc; }
+.pass { color: #22863a; font-weight: 600; }
+.fail { color: #cb2431; font-weight: 600; }
+.delta-pos { color: #22863a; }
+.delta-neg { color: #cb2431; }
+.delta-zero { color: #586069; }
+.meta { color: #586069; font-size: 0.9em; margin-bottom: 16px; }
+.warning-box { background: #fffbdd; border: 1px solid #f9c513; border-radius: 4px; padding: 8px 12px; margin-bottom: 16px; }
+.sig-note { font-size: 0.85em; color: #586069; margin-top: 4px; }
+.bar-container { display: inline-block; width: 120px; height: 20px; background: #e1e4e8; border-radius: 3px; vertical-align: middle; overflow: hidden; }
+.bar { height: 20px; background: #0366d6; display: inline-block; border-radius: 3px 0 0 3px; }
+.bar-label { display: inline-block; margin-left: 6px; font-size: 0.85em; vertical-align: middle; }
+.rate-green { background-color: #dcffe4; }
+.rate-yellow { background-color: #fff5b1; }
+.rate-red { background-color: #ffdce0; }
+.summary-box { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 4px; padding: 12px 16px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Comparison: {{ .LeftTag }} vs {{ .RightTag }}</h1>
+{{ if .LowSampleWarning }}<div class="warning-box">{{ .LowSampleWarning }}</div>{{ end }}
+
+<h2>Overall</h2>
+<table>
+<tr><th>Metric</th><th>{{ .LeftTag }}</th><th>{{ .RightTag }}</th><th>Delta</th></tr>
+<tr><td>Pass Rate</td><td>{{ .LeftPassRateCI }}</td><td>{{ .RightPassRateCI }}</td><td class="{{ deltaClass .DeltaPassRate }}">{{ .DeltaPassRate }}</td></tr>
+<tr><td>Avg Correctness</td><td>{{ printf "%.2f" .LeftAvgCorrectness }}</td><td>{{ printf "%.2f" .RightAvgCorrectness }}</td><td class="{{ deltaClass .DeltaCorrectness }}">{{ .DeltaCorrectness }}</td></tr>
+{{- if .HasWallTime }}
+<tr><td>Avg Wall Time</td><td>{{ .LeftAvgWallTime }}</td><td>{{ .RightAvgWallTime }}</td><td>{{ .DeltaWallTime }}</td></tr>
+{{- end }}
+{{- if .HasL2Tests }}
+<tr><td>Avg L2 Tests</td><td>{{ printf "%.1f" .LeftAvgL2 }}</td><td>{{ printf "%.1f" .RightAvgL2 }}</td><td>{{ .DeltaL2 }}</td></tr>
+{{- end }}
+{{- if .HasTokens }}
+<tr><td>Avg Tokens</td><td>{{ .LeftAvgTokens }}</td><td>{{ .RightAvgTokens }}</td><td>{{ .DeltaTokens }}</td></tr>
+<tr><td>Est. Cost/Task</td><td>{{ .LeftAvgCost }}</td><td>{{ .RightAvgCost }}</td><td>{{ .DeltaCost }}</td></tr>
+{{- end }}
+</table>
+<p class="sig-note"><code>*</code> = statistically significant (95% Wilson Score CIs do not overlap)</p>
+
+{{ if .HasRubric }}
+<h2>Code Quality (LLM Judge)</h2>
+<table>
+<tr><th>Dimension</th><th>{{ .LeftTag }}</th><th>{{ .RightTag }}</th><th>Delta</th></tr>
+<tr><td>Correctness</td><td>{{ printf "%.1f" .LeftRubric.Correctness }}/5</td><td>{{ printf "%.1f" .RightRubric.Correctness }}/5</td><td class="{{ deltaClassFloat (sub .RightRubric.Correctness .LeftRubric.Correctness) }}">{{ printf "%+.1f" (sub .RightRubric.Correctness .LeftRubric.Correctness) }}</td></tr>
+<tr><td>Readability</td><td>{{ printf "%.1f" .LeftRubric.Readability }}/5</td><td>{{ printf "%.1f" .RightRubric.Readability }}/5</td><td class="{{ deltaClassFloat (sub .RightRubric.Readability .LeftRubric.Readability) }}">{{ printf "%+.1f" (sub .RightRubric.Readability .LeftRubric.Readability) }}</td></tr>
+<tr><td>Simplicity</td><td>{{ printf "%.1f" .LeftRubric.Simplicity }}/5</td><td>{{ printf "%.1f" .RightRubric.Simplicity }}/5</td><td class="{{ deltaClassFloat (sub .RightRubric.Simplicity .LeftRubric.Simplicity) }}">{{ printf "%+.1f" (sub .RightRubric.Simplicity .LeftRubric.Simplicity) }}</td></tr>
+<tr><td>Robustness</td><td>{{ printf "%.1f" .LeftRubric.Robustness }}/5</td><td>{{ printf "%.1f" .RightRubric.Robustness }}/5</td><td class="{{ deltaClassFloat (sub .RightRubric.Robustness .LeftRubric.Robustness) }}">{{ printf "%+.1f" (sub .RightRubric.Robustness .LeftRubric.Robustness) }}</td></tr>
+<tr><td>Minimality</td><td>{{ printf "%.1f" .LeftRubric.Minimality }}/5</td><td>{{ printf "%.1f" .RightRubric.Minimality }}/5</td><td class="{{ deltaClassFloat (sub .RightRubric.Minimality .LeftRubric.Minimality) }}">{{ printf "%+.1f" (sub .RightRubric.Minimality .LeftRubric.Minimality) }}</td></tr>
+<tr><td>Maintainability</td><td>{{ printf "%.1f" .LeftRubric.Maintainability }}/5</td><td>{{ printf "%.1f" .RightRubric.Maintainability }}/5</td><td class="{{ deltaClassFloat (sub .RightRubric.Maintainability .LeftRubric.Maintainability) }}">{{ printf "%+.1f" (sub .RightRubric.Maintainability .LeftRubric.Maintainability) }}</td></tr>
+<tr><td><strong>Composite</strong></td><td><strong>{{ printf "%.1f" .LeftRubric.Composite }}/5</strong></td><td><strong>{{ printf "%.1f" .RightRubric.Composite }}/5</strong></td><td><strong>{{ .DeltaComposite }}</strong></td></tr>
+</table>
+{{ end }}
+
+{{ if .TierComparisons }}
+<h2>Per-Tier Comparison</h2>
+<table>
+<tr><th>Tier</th><th>Left Pass Rate</th><th>Right Pass Rate</th><th>Left Avg Corr</th><th>Right Avg Corr</th><th>Delta</th></tr>
+{{ range .TierComparisons -}}
+<tr>
+<td>T{{ .Tier }}</td>
+<td class="{{ passRateClass .LeftPassRate }}">{{ .LeftPassRate }}</td>
+<td class="{{ passRateClass .RightPassRate }}">{{ .RightPassRate }}</td>
+<td>{{ .LeftAvgCorr }}</td>
+<td>{{ .RightAvgCorr }}</td>
+<td class="{{ deltaClass .DeltaCorrectness }}">{{ .DeltaCorrectness }}</td>
+</tr>
+{{ end -}}
+</table>
+{{ end }}
+
+<h2>Per-Task Comparison</h2>
+<table>
+<tr><th>Task</th><th>Left Pass</th><th>Right Pass</th><th>Left Score</th><th>Right Score</th><th>Left Time</th><th>Right Time</th><th>E2E Cases</th><th>Winner</th></tr>
+{{ range .Tasks -}}
+<tr>
+<td>{{ .TaskID }}</td>
+<td>{{ passIcon .LeftPass }}</td>
+<td>{{ passIcon .RightPass }}</td>
+<td>{{ printf "%.2f" .LeftScore }}</td>
+<td>{{ printf "%.2f" .RightScore }}</td>
+<td>{{ .LeftTime }}</td>
+<td>{{ .RightTime }}</td>
+<td>{{ .E2ECases }}</td>
+<td>{{ .Winner }}</td>
+</tr>
+{{ end -}}
+</table>
+{{ if .HasPairwise }}
+<h2>Pairwise Comparison (LLM Judge)</h2>
+<table>
+<tr><th>Task</th><th>Winner</th><th>Consistent</th></tr>
+{{ range .PairwiseResults -}}
+<tr>
+<td>{{ .TaskID }}</td>
+<td>{{ .Winner }}</td>
+<td>{{ if .PositionConsistent }}Yes{{ else }}No{{ end }}</td>
+</tr>
+{{ end -}}
+</table>
+<div class="summary-box">
+<strong>Pairwise:</strong> Left wins: {{ .PairwiseSummary.LeftWins }} | Right wins: {{ .PairwiseSummary.RightWins }} | Tie: {{ .PairwiseSummary.Ties }}
+</div>
+{{ end }}
+<div class="summary-box">
+<strong>Summary:</strong> Left wins: {{ .LeftWins }} | Right wins: {{ .RightWins }} | Tie: {{ .Ties }}
+</div>
+</body>
+</html>

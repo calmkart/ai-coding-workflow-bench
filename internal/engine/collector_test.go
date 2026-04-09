@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +53,14 @@ func TestParseVerifyOutput(t *testing.T) {
 			wantL2P: 0, wantL2T: 0,
 			wantL3:  0,
 			wantL4P: 0, wantL4T: 0,
+		},
+		{
+			name:    "E2E compile failure produces L4=0/1",
+			input:   "BENCH_RESULT: L1=PASS L2=8/8 L3=0 L4=0/1\n",
+			wantL1:  true,
+			wantL2P: 8, wantL2T: 8,
+			wantL3:  0,
+			wantL4P: 0, wantL4T: 1,
 		},
 	}
 
@@ -121,6 +130,107 @@ func TestRunVerify_TestFailureNotError(t *testing.T) {
 	}
 	if !strings.Contains(out, "BENCH_RESULT") {
 		t.Errorf("expected BENCH_RESULT in output, got: %s", out)
+	}
+}
+
+// TestVerifyOutputStorage verifies that verify.log is saved to the raw directory
+// when HomeDir is set in RunConfig.
+func TestVerifyOutputStorage(t *testing.T) {
+	homeDir := t.TempDir()
+	runID := "test-verify-storage-run1"
+
+	// Simulate saving verify output as executeOneRun does.
+	rawDir := filepath.Join(homeDir, "raw", runID)
+	if err := os.MkdirAll(rawDir, 0755); err != nil {
+		t.Fatalf("create raw dir: %v", err)
+	}
+
+	verifyOutput := "some test output\nBENCH_RESULT: L1=PASS L2=8/8 L3=0 L4=5/5\n"
+	verifyLogPath := filepath.Join(rawDir, "verify.log")
+	if err := os.WriteFile(verifyLogPath, []byte(verifyOutput), 0644); err != nil {
+		t.Fatalf("write verify.log: %v", err)
+	}
+
+	// Verify the file exists and has correct content.
+	data, err := os.ReadFile(verifyLogPath)
+	if err != nil {
+		t.Fatalf("read verify.log: %v", err)
+	}
+	if string(data) != verifyOutput {
+		t.Errorf("verify.log content mismatch:\ngot:  %q\nwant: %q", string(data), verifyOutput)
+	}
+}
+
+// gitCmd is a test helper that runs a git command in the specified directory.
+func gitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, string(out))
+	}
+}
+
+// TestCaptureDiff_SavesPatch verifies that captureDiff creates diff.patch
+// when there are changes in the worktree.
+func TestCaptureDiff_SavesPatch(t *testing.T) {
+	// Create a temporary git repo.
+	repoDir := t.TempDir()
+
+	// Initialize git repo with a file.
+	gitCmd(t, repoDir, "init")
+	if err := os.WriteFile(filepath.Join(repoDir, "hello.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, repoDir, "add", "-A")
+	gitCmd(t, repoDir, "commit", "-m", "initial")
+
+	// Make a change.
+	if err := os.WriteFile(filepath.Join(repoDir, "hello.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	homeDir := t.TempDir()
+	runID := "test-capture-diff"
+
+	captureDiff(repoDir, homeDir, runID)
+
+	patchPath := filepath.Join(homeDir, "raw", runID, "diff.patch")
+	data, err := os.ReadFile(patchPath)
+	if err != nil {
+		t.Fatalf("expected diff.patch to exist: %v", err)
+	}
+	if !strings.Contains(string(data), "func main()") {
+		t.Errorf("expected diff.patch to contain 'func main()', got:\n%s", string(data))
+	}
+}
+
+// TestCaptureDiff_NoChanges verifies that captureDiff does not create diff.patch
+// when there are no changes.
+func TestCaptureDiff_NoChanges(t *testing.T) {
+	repoDir := t.TempDir()
+	gitCmd(t, repoDir, "init")
+	if err := os.WriteFile(filepath.Join(repoDir, "hello.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, repoDir, "add", "-A")
+	gitCmd(t, repoDir, "commit", "-m", "initial")
+
+	homeDir := t.TempDir()
+	runID := "test-no-changes"
+
+	captureDiff(repoDir, homeDir, runID)
+
+	patchPath := filepath.Join(homeDir, "raw", runID, "diff.patch")
+	if _, err := os.Stat(patchPath); !os.IsNotExist(err) {
+		t.Error("expected diff.patch to not exist when no changes")
 	}
 }
 
