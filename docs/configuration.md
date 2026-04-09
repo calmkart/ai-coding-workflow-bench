@@ -64,7 +64,7 @@ Map of workflow name to configuration. Each entry defines a named workflow that 
 | `adapter` | string | yes | Name of the adapter implementation to use |
 
 Currently available adapters:
-- `vanilla` -- Runs `claude -p` directly with the plan content
+- `vanilla` -- Runs `claude --bare -p` directly with the plan content. The `--bare` flag ensures a pure model baseline: no plugins, no CLAUDE.md, no session-start hooks.
 - `custom` -- User-defined command execution (see below)
 
 ### defaults
@@ -104,7 +104,6 @@ LLM Judge configuration for code quality scoring.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | yes | API key for Claude CLI and LLM Judge |
-| `OPENAI_API_KEY` | no | Required only when `judge.enable_ensemble` is true |
 | `HOME` | yes | Used to locate `~/.claude/workflow-bench/` |
 
 ## Config Resolution Order
@@ -119,7 +118,7 @@ Config values are merged with defaults: if your config only specifies `workflows
 
 | Adapter | Use When | Example |
 |---------|----------|---------|
-| `vanilla` | Baseline testing with direct Claude CLI | `claude -p` with plan content |
+| `vanilla` | Pure model baseline (no plugins, no CLAUDE.md, no hooks) | `claude --bare -p` with plan content |
 | `custom` | Any other tool, wrapper script, multi-agent workflow, or custom configuration | Aider, Cursor, custom scripts, `claude --agent manager` |
 
 Use `vanilla` as the baseline, then compare against `custom` workflows.
@@ -217,6 +216,45 @@ workflows:
 ```bash
 # Run with a custom workflow
 workflow-bench run --workflow multi-agent --tasks tier1 --runs 1 --tag test
+```
+
+## Benchmarking Superpowers
+
+To benchmark [superpowers](https://github.com/obra/superpowers-marketplace) against the vanilla baseline:
+
+1. Install the plugin:
+   ```
+   /plugin marketplace add obra/superpowers-marketplace
+   /plugin install superpowers@superpowers-marketplace
+   ```
+
+2. Add a workflow to `bench.yaml`:
+   ```yaml
+   workflows:
+     vanilla:
+       adapter: vanilla
+
+     superpowers:
+       adapter: custom
+       entry_command: |
+         claude --plugin-dir ~/.claude/plugins/cache/claude-plugins-official/superpowers -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
+   ```
+
+3. Run both workflows and compare:
+   ```bash
+   workflow-bench run --workflow vanilla --tasks tier1 --runs 3 --tag vanilla-baseline
+   workflow-bench run --workflow superpowers --tasks tier1 --runs 3 --tag superpowers-v1
+   workflow-bench compare --left vanilla-baseline --right superpowers-v1
+   ```
+
+**Note**: The `vanilla` adapter uses `--bare` mode, which disables all plugins, CLAUDE.md, and hooks. This provides a fair pure-model baseline. If you want to benchmark with your full environment (all installed plugins + CLAUDE.md), use a `default` custom workflow instead:
+
+```yaml
+workflows:
+  default:
+    adapter: custom
+    entry_command: |
+      claude -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
 ```
 
 ## Adding a New Adapter (Go)

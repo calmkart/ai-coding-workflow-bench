@@ -53,7 +53,7 @@ go build -o workflow-bench ./cmd/workflow-bench
 # 验证内置任务
 ./workflow-bench validate --tasks tier1
 
-# 运行基准测试（vanilla：直接调用 Claude CLI）
+# 运行基准测试（vanilla：Claude CLI --bare 模式，不加载 plugin/CLAUDE.md/hooks）
 ./workflow-bench run --workflow vanilla --tasks tier1 --runs 1 --tag my-first-run
 
 # 查看结果
@@ -132,7 +132,7 @@ workflow-bench/
 
 | 命令 | 说明 |
 |------|------|
-| `run` | 运行基准测试（`--parallel`、`--shard`、`--keep-worktree`、`--pairwise`） |
+| `run` | 运行基准测试（`--parallel`、`--shard`、`--keep-worktree`） |
 | `report` | 生成汇总报告（`--format markdown\|html`） |
 | `compare` | 并排对比两个 tag 的结果（`--pairwise` 启用 LLM 比较） |
 | `trend` | 显示多个 tag 的指标趋势（`--tags v1,v2,v3`） |
@@ -206,31 +206,34 @@ else:
 
 ```yaml
 workflows:
+  # 纯 Claude Code 基线（--bare：不加载 plugin、不读 CLAUDE.md、不执行 hooks）
   vanilla:
     adapter: vanilla
 
-  # 示例：使用 custom adapter 配置多智能体工作流
+  # 示例：Claude Code + superpowers 插件
+  # superpowers:
+  #   adapter: custom
+  #   entry_command: |
+  #     claude --plugin-dir ~/.claude/plugins/cache/claude-plugins-official/superpowers -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
+
+  # 示例：Claude Code 加载所有已安装 plugin 和 CLAUDE.md
+  # default:
+  #   adapter: custom
+  #   entry_command: |
+  #     claude -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
+
+  # 示例：多智能体工作流（如 claude --agent manager）
   # multi-agent:
   #   adapter: custom
   #   setup_commands:
-  #     - "mkdir -p .claude/agents"
+  #     - "mkdir -p .claude/agents .planning/manager"
   #     - "cp -r ~/.claude/agents/*.md .claude/agents/"
-  #     - "cp -r ~/.claude/agents/reference .claude/agents/ 2>/dev/null || true"
-  #     - "mkdir -p .planning/manager"
   #   entry_command: |
-  #     claude --agent manager -p "You are running a benchmark evaluation. Execute your FULL multi-agent workflow:
-  #     1. Read the plan from $BENCH_PLAN_FILE
-  #     2. Spawn Architect agent to formalize the plan into a spec
-  #     3. Spawn Coding agent to implement from the spec
-  #     4. Spawn Testing agent to write scenario tests
-  #     5. Spawn Challenger agent to review the implementation
-  #     6. Fix any issues found by Challenger
-  #     7. Repeat until Challenger passes
-  #     IMPORTANT: Do NOT skip any phase. All permission gates are pre-approved." --output-format json --dangerously-skip-permissions
+  #     claude --agent manager -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
 
 defaults:
   runs_per_task: 3
-  timeout_multiplier: 3
+  timeout_multiplier: 5
 ```
 
 完整配置参考见 [docs/zh-CN/configuration.md](docs/zh-CN/configuration.md)，包含两种 adapter（`vanilla`、`custom`）的详细说明。

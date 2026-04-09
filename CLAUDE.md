@@ -57,4 +57,4 @@ Verify script templates and the DB schema are embedded via `//go:embed`. Changes
 
 ## Roadmap Context
 
-P1-P2 (CLI, adapters, 100 tasks, L1-L4 verify) are done. P3+ (LLM judge, pairwise ranking, stability scoring) are planned but not yet implemented.
+P1-P2 (CLI, adapters, 100 tasks, L1-L4 verify) are done. P3+ (LLM judge, pairwise ranking, stability scoring) are implemented.

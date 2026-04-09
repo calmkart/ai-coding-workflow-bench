@@ -19,7 +19,7 @@
 
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--workflow` | string | `vanilla` | Workflow adapter：`vanilla`、`custom` 或自定义名称 |
+| `--workflow` | string | `vanilla` | Workflow adapter：`vanilla`（使用 `--bare` 纯模型基线）、`custom` 或自定义名称 |
 | `--tasks` | string | *（必填）* | 任务选择器：`tier1`、`tier1/fix-handler-bug` 或 `all` |
 | `--tag` | string | *（必填）* | 标记本次运行的 tag |
 | `--runs` | int | 取配置值（默认 3） | 每个任务的运行次数 |
@@ -226,7 +226,7 @@ workflow-bench trend --tags v1,v2,v3 --format html > trend.html
 |------|------|--------|------|
 | `--tag` | string | | 删除此 tag 的所有运行 |
 | `--older-than` | string | | 删除早于此时间段的运行（如 `30d`、`24h`） |
-| `--worktrees` | bool | false | 清理 /tmp 中的孤立 worktree 目录 |
+| `--worktrees` | bool | false | 清理系统临时目录中的孤立 worktree 目录 |
 
 **示例**：
 

@@ -53,7 +53,7 @@ go build -o workflow-bench ./cmd/workflow-bench
 # Validate built-in tasks
 ./workflow-bench validate --tasks tier1
 
-# Run a benchmark (vanilla: Claude CLI direct)
+# Run a benchmark (vanilla: Claude CLI --bare mode, no plugins/CLAUDE.md/hooks)
 ./workflow-bench run --workflow vanilla --tasks tier1 --runs 1 --tag my-first-run
 
 # View results
@@ -132,7 +132,7 @@ workflow-bench/
 
 | Command | Description |
 |---------|-------------|
-| `run` | Run benchmark against tasks (`--parallel`, `--shard`, `--keep-worktree`, `--pairwise`) |
+| `run` | Run benchmark against tasks (`--parallel`, `--shard`, `--keep-worktree`) |
 | `report` | Generate summary report (`--format markdown\|html`) |
 | `compare` | Compare two tagged runs side-by-side (`--pairwise` for LLM comparison) |
 | `trend` | Show metrics trend across multiple tags (`--tags v1,v2,v3`) |
@@ -206,31 +206,34 @@ Config lives at `~/.claude/workflow-bench/bench.yaml` (created by `init`).
 
 ```yaml
 workflows:
+  # Pure Claude Code baseline (--bare: no plugins, no CLAUDE.md, no hooks)
   vanilla:
     adapter: vanilla
 
-  # Example: multi-agent workflow using custom adapter
+  # Example: Claude Code with superpowers plugin
+  # superpowers:
+  #   adapter: custom
+  #   entry_command: |
+  #     claude --plugin-dir ~/.claude/plugins/cache/claude-plugins-official/superpowers -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
+
+  # Example: Claude Code with all your installed plugins and CLAUDE.md
+  # default:
+  #   adapter: custom
+  #   entry_command: |
+  #     claude -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
+
+  # Example: Multi-agent workflow (e.g., claude --agent manager)
   # multi-agent:
   #   adapter: custom
   #   setup_commands:
-  #     - "mkdir -p .claude/agents"
+  #     - "mkdir -p .claude/agents .planning/manager"
   #     - "cp -r ~/.claude/agents/*.md .claude/agents/"
-  #     - "cp -r ~/.claude/agents/reference .claude/agents/ 2>/dev/null || true"
-  #     - "mkdir -p .planning/manager"
   #   entry_command: |
-  #     claude --agent manager -p "You are running a benchmark evaluation. Execute your FULL multi-agent workflow:
-  #     1. Read the plan from $BENCH_PLAN_FILE
-  #     2. Spawn Architect agent to formalize the plan into a spec
-  #     3. Spawn Coding agent to implement from the spec
-  #     4. Spawn Testing agent to write scenario tests
-  #     5. Spawn Challenger agent to review the implementation
-  #     6. Fix any issues found by Challenger
-  #     7. Repeat until Challenger passes
-  #     IMPORTANT: Do NOT skip any phase. All permission gates are pre-approved." --output-format json --dangerously-skip-permissions
+  #     claude --agent manager -p "$BENCH_PLAN_PROMPT" --output-format json --dangerously-skip-permissions
 
 defaults:
   runs_per_task: 3
-  timeout_multiplier: 3
+  timeout_multiplier: 5
 ```
 
 See [docs/configuration.md](docs/configuration.md) for full field reference including both adapters (`vanilla`, `custom`).

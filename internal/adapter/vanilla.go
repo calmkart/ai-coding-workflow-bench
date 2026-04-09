@@ -26,11 +26,12 @@ func (a *VanillaAdapter) Setup(ctx context.Context, worktreeDir string) error {
 	return nil
 }
 
-// Run executes claude CLI with the plan content.
+// Run executes claude CLI in --bare mode with the plan content.
+// The --bare flag ensures a pure baseline: no plugins, no CLAUDE.md, no hooks.
 // The plan is written to a temporary file to avoid ARG_MAX limits.
 // Claude CLI is called with --output-format json to capture token usage.
 //
-// @implements REQ-ADAPTER-VANILLA (vanilla adapter: plan file + claude -p + JSON parse)
+// @implements REQ-ADAPTER-VANILLA (vanilla adapter: --bare + plan file + claude -p + JSON parse)
 func (a *VanillaAdapter) Run(ctx context.Context, worktreeDir string, planContent string) (*RunOutput, error) {
 	start := time.Now()
 
@@ -43,6 +44,7 @@ func (a *VanillaAdapter) Run(ctx context.Context, worktreeDir string, planConten
 
 	planPrompt := fmt.Sprintf("Read the plan from %s and implement it.", planFile)
 	cmd := exec.CommandContext(ctx, "claude",
+		"--bare",
 		"-p", planPrompt,
 		"--output-format", "json",
 		"--dangerously-skip-permissions",

@@ -19,7 +19,7 @@
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--workflow` | string | `vanilla` | Workflow adapter: `vanilla`, `custom`, or user-defined name |
+| `--workflow` | string | `vanilla` | Workflow adapter: `vanilla` (uses `--bare` for pure baseline), `custom`, or user-defined name |
 | `--tasks` | string | *(required)* | Task selector: `tier1`, `tier1/fix-handler-bug`, or `all` |
 | `--tag` | string | *(required)* | Tag to label this benchmark run |
 | `--runs` | int | from config (default 3) | Number of runs per task |
@@ -304,7 +304,7 @@ workflow-bench merge --from shard1.db --from shard2.db --from shard3.db --to com
 |------|------|---------|-------------|
 | `--tag` | string | | Delete all runs with this tag |
 | `--older-than` | string | | Delete runs older than this duration (e.g. `30d`, `24h`) |
-| `--worktrees` | bool | false | Clean up orphaned worktree directories in /tmp |
+| `--worktrees` | bool | false | Clean up orphaned worktree directories in system temp directory |
 
 **Examples**:
 
@@ -324,7 +324,7 @@ workflow-bench clean --older-than 7d --worktrees
 
 **Notes**:
 - At least one of `--tag`, `--older-than`, or `--worktrees` must be specified.
-- `--worktrees` removes `/tmp/bench-worktree-*` and `/tmp/bench-verify.*` directories.
+- `--worktrees` removes orphaned `bench-worktree-*` and `bench-verify-*` directories from the system temp directory.
 
 ---
 
