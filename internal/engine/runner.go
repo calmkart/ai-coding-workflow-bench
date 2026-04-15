@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -68,6 +69,10 @@ func (p *progressTracker) report(taskID string, runNum int, success bool) {
 		c, p.total, pct, passRate, etaStr)
 	p.mu.Unlock()
 }
+
+// errAdapterInfra signals a non-workflow infrastructure failure that should be retried.
+// Examples: auth expiry, rate limiting, or CLI crash — not a task failure.
+var errAdapterInfra = fmt.Errorf("adapter infrastructure error")
 
 // runCounter provides a monotonically increasing sequence to guarantee run ID
 // uniqueness even when multiple runs start within the same millisecond.
@@ -217,9 +222,23 @@ func executeSerial(ctx context.Context, db *store.DB, adpt adapter.Adapter, filt
 
 			fmt.Printf("[%d/%d] %s run#%d ...\n", runIdx, totalRuns, task.ID, runNum)
 
-			passed, err := executeOneRun(ctx, db, adpt, task, runID, cfg, runNum, nil)
-			if err != nil {
-				slog.Error("run failed", "task", task.ID, "run", runNum, "error", err)
+			const maxRetries = 3
+			var passed bool
+			var runErr error
+			for attempt := 0; attempt <= maxRetries; attempt++ {
+				if attempt > 0 {
+					backoff := time.Duration(attempt) * 30 * time.Second
+					slog.Info("retrying after infrastructure error", "task", task.ID, "attempt", attempt+1, "backoff", backoff)
+					time.Sleep(backoff)
+					runID = generateRunID(cfg.Tag, task.ID, runNum) // fresh run ID for retry
+				}
+				passed, runErr = executeOneRun(ctx, db, adpt, task, runID, cfg, runNum, nil)
+				if !errors.Is(runErr, errAdapterInfra) {
+					break
+				}
+			}
+			if runErr != nil {
+				slog.Error("run failed", "task", task.ID, "run", runNum, "error", runErr)
 				pt.report(task.ID, runNum, false)
 				continue
 			}
@@ -275,9 +294,23 @@ func executeParallel(ctx context.Context, db *store.DB, adpt adapter.Adapter, fi
 				fmt.Printf("[%d/%d] %s run#%d ...\n", idx, totalRuns, t.ID, rn)
 				mu.Unlock()
 
-				passed, err := executeOneRun(ctx, db, adpt, t, runID, cfg, rn, &mu)
-				if err != nil {
-					slog.Error("run failed", "task", t.ID, "run", rn, "error", err)
+				const maxRetries = 3
+				var passed bool
+				var runErr error
+				for attempt := 0; attempt <= maxRetries; attempt++ {
+					if attempt > 0 {
+						backoff := time.Duration(attempt) * 30 * time.Second
+						slog.Info("retrying after infrastructure error", "task", t.ID, "attempt", attempt+1, "backoff", backoff)
+						time.Sleep(backoff)
+						runID = generateRunID(cfg.Tag, t.ID, rn)
+					}
+					passed, runErr = executeOneRun(ctx, db, adpt, t, runID, cfg, rn, &mu)
+					if !errors.Is(runErr, errAdapterInfra) {
+						break
+					}
+				}
+				if runErr != nil {
+					slog.Error("run failed", "task", t.ID, "run", rn, "error", runErr)
 					pt.report(t.ID, rn, false)
 					return
 				}
@@ -504,6 +537,17 @@ func executeOneRun(ctx context.Context, db *store.DB, adpt adapter.Adapter, task
 		}
 		markRunFailed(db, run, status)
 		return false, fmt.Errorf("adapter run: %w", err)
+	}
+
+	// Detect infrastructure failures: adapter exited too fast with an error.
+	// This typically means auth expiry, rate limiting, or CLI crash — not a task failure.
+	if output.ExitCode != 0 && output.WallTime < 30*time.Second {
+		slog.Warn("adapter infrastructure error (flash exit)",
+			"task", task.ID, "exit", output.ExitCode,
+			"wallTime", output.WallTime, "stderr", output.Stderr)
+		// Remove the run record so retry can re-create it.
+		_ = db.DeleteIncompleteRun(cfg.Tag, cfg.Workflow, task.ID, runNum)
+		return false, errAdapterInfra
 	}
 
 	// Phase 4: Record token usage and efficiency.
